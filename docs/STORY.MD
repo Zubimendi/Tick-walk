@@ -1,4 +1,44 @@
-# Tickwalk: Story
+# Title: Offline-First Is a Concurrency Problem in Disguise — How Tickwalk Survives Zero-Signal Field Inspections
+
+---
+
+**Medium Tags:** `#flutter` `#offlinefirst` `#mobiledevelopment` `#softwarearchitecture` `#sqlite`
+
+**LinkedIn Hashtags:** `#Flutter` `#Dart` `#MobileDev` `#OfflineFirst` `#SoftwareArchitecture` `#SQLite` `#PocketBase` `#DistributedSystems` `#FieldTech` `#TechLeadership`
+
+---
+
+## Short version (LinkedIn Post)
+
+Site inspection walk-rounds almost always happen where connectivity fails: basement boiler rooms, concrete shafts, or rural substations. Most inspection apps either freeze when signal drops, or dump hundreds of megabytes into a silent upload failure.
+
+For Project 4 of my portfolio (Tickwalk), I built an offline-first mobile inspection engine in Flutter & Drift (SQLite) with an optional PocketBase sync backend. Three key engineering lessons from building it:
+
+1. **Snapshots, Not References:** Modifying an inspection template must never mutate past inspections. Starting an inspection deep-copies template items into an immutable inspection snapshot. Changing a safety rule tomorrow won't quietly rewrite history from last month.
+2. **The Camera-Kill Problem on Low-RAM Devices:** Opening the native camera on a budget Android phone frequently triggers OS low-memory process termination. If your app is killed, the captured photo is lost. I solved this with an interruption state machine: persist a `pending_capture` record to disk *before* launching the camera intent, then recover lost picker data on resume and attach it safely to the originating checklist item.
+3. **Two-Lane Sync Architecture:** Never mix ordered metadata and bulky media in a single queue. Tickwalk runs two decoupled sync lanes:
+   - **Lane 1 (Records):** Strictly ordered JSON operations (parents before children) with outbox coalescing (rapid edits collapse to the latest state).
+   - **Lane 2 (Media):** Parallel multipart uploads (bounded concurrency of 2) with per-file exponential backoff, SHA-256 hashing, and "Wi-Fi Only" data gating.
+
+Evidence stamps (device time, GPS accuracy, server `received_at`) are treated honestly: they provide context, not tamper-proof cryptographic proof, and the auto-generated PDF report states that limitation upfront.
+
+GitHub repository: <your-repo-link>
+
+---
+
+## Medium Article Outline & Publishing Angle
+
+### Working Title
+**Offline-First Is Not Just "Caching": Building a Crash-Proof Mobile Inspection Pipeline in Flutter**
+
+### Core Narrative Arc
+- **The Hook:** The nightmare of the "silent upload failure": an inspector spends 3 hours walking a sub-basement, drives home, and finds out none of the 45 photos saved because the app assumed a continuous WebSocket.
+- **The Core Tension:** Local SQLite vs. Remote Cloud. Why local SQLite must be the absolute arbiter of state, and why the UI must never await an HTTP roundtrip.
+- **Deep Dive 1: Surviving the Android Camera Kill.** Walking through the lifecycle: `pending_capture` persistence -> `retrieveLostData()` on Flutter cold boot -> re-attaching orphaned files.
+- **Deep Dive 2: Two-Lane Sync & Write Coalescing.** Why a single FIFO queue causes head-of-line blocking when a 5MB photo stalls behind an answer update.
+- **Honest Framing on Evidence:** Why device clocks and GPS can be spoofed, how server `received_at` provides a verifiable second anchor, and why transparent disclaimers build more user trust than false claims of "unhackable timestamps".
+
+---
 
 ## The problem
 
@@ -11,7 +51,7 @@ The inspection itself is not hard. Keeping the evidence attached to the right it
 - **The site supervisor or safety officer:** needs a fast, repeatable walk-round with proof of findings.
 - **The facility or property manager:** needs consistent checks (generator room, move-in condition) with photos and a report to share.
 
-(Validation note, fill in after talking to 2 or 3 people who do inspections: what they use today, how they send evidence, what goes wrong.)
+*(Validation note, fill in after talking to 2 or 3 people who do inspections: what they use today, how they send evidence, what goes wrong.)*
 
 ## Honest framing
 

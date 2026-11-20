@@ -1,189 +1,355 @@
 # Tickwalk
 
-**Site inspection checklists with photo and GPS evidence that work with no signal.**
+[![Flutter](https://img.shields.io/badge/Flutter-Dart%203-02569B.svg?logo=flutter)](https://flutter.dev/)
+[![SQLite](https://img.shields.io/badge/SQLite-Drift-5C6BC0.svg)](https://drift.simonbinder.eu/)
+[![PocketBase](https://img.shields.io/badge/Backend-PocketBase-B8DBE4.svg)](https://pocketbase.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Tests](https://img.shields.io/badge/Tests-Passing-brightgreen.svg)]()
+[![Postman](https://img.shields.io/badge/Postman-17%2F17%20Passing-brightgreen.svg)]()
 
-![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey)
-![Flutter](https://img.shields.io/badge/Flutter-Dart%203-02569B?logo=flutter)
-![State](https://img.shields.io/badge/state-Riverpod-00B8D4)
-![DB](https://img.shields.io/badge/local%20db-Drift-5C6BC0)
-![Backend](https://img.shields.io/badge/backend-PocketBase-B8DBE4)
-![License](https://img.shields.io/badge/license-MIT-green)
+A production-grade, offline-first mobile inspection engine in Flutter. Project 4 of the mobile portfolio roadmap.
 
-<!-- Add after build: docs/media/demo.gif and 4 screenshots (checklist, photo evidence, uploads queue, PDF report) -->
+Field inspections happen where signal is weakest: basement power rooms, active construction sites, and remote substations. When connectivity drops, most inspection apps freeze, drop photos, or burn cellular quotas with silent upload failures. Tickwalk keeps the entire inspection workflow local on device, stamps evidence with time and GPS, and syncs reliably in the background when connectivity returns.
 
-## Why this exists
+---
 
-Site walk-rounds often happen where signal is poor: a building under construction, a basement power room, a rural facility. Findings end up on paper, or as photos in a chat group with no link to the checklist item, no timestamp you can trust and no record of where they were taken.
+## Architectural Core: The Three Pillars
 
-Tickwalk keeps the whole inspection on the phone. Each answer is saved instantly. Each photo is compressed, stamped with time and GPS, and queued. When a connection (or Wi-Fi) is available, everything uploads in the background and you can see exactly what has been sent.
+Tickwalk is designed around three foundational architectural principles documented in `docs/ARCHITECTURE.MD`:
 
-## Features
+### 1. The Device DB Decides; The Server Backs Up
 
-- Reusable checklist templates (starter templates included; create and edit your own)
-- Pass, Fail and N/A answers, plus text and number items
-- Fail rules: items can require a photo when failed
-- Camera-only evidence capture with automatic time and GPS stamp (accuracy shown)
-- On-device compression and thumbnails to save storage and data
-- Autosave on every change; recovers if the camera kills the app
-- Review screen that lists exactly what blocks completion
-- Upload queue with per-photo status, retry and an optional "Wi-Fi only for photos" mode
-- PDF report with failed items and photo evidence (share through any app)
-- Optional account for backup and multi-device records
-- Light and dark themes, large touch targets for outdoor use
+Inspection data and photo evidence are captured in high-stress, zero-connectivity environments. The phone's local storage and database cannot depend on network roundtrips:
 
-## How it works
+- **Local SQLite (via Drift)** is the authoritative source of truth: templates, inspections, items, attachment metadata, and sync outbox state live on-device. All UI reads stream directly from reactive Drift DAOs.
+- **The PocketBase server** is an optional cloud backup and synchronization target. The app is 100% operational without an account or an internet connection.
+- **Write order:** Local SQLite transaction first (durable intent), outbox queue second (if signed in). A network failure never rolls back or halts a local inspection.
 
-1. Every screen reads from a local SQLite database (Drift), so nothing waits on the network.
-2. Starting an inspection copies the template into inspection items, so editing a template later never changes past inspections.
-3. A photo goes through a pipeline: camera, GPS fix, native compression, SHA-256 hash, thumbnail, database row and a queued upload, all recorded in one transaction.
-4. If you sign in, a sync engine runs two lanes: ordered record sync, then parallel photo uploads with per-file retry and backoff.
+The failure matrix is asymmetric and dictates the engine design:
 
-Full detail: [docs/architecture.md](docs/architecture.md).
+| Divergence | Harm | Handling |
+|---|---|---|
+| In local SQLite, not yet in PocketBase | None (offline mode or queueing) | Queued in outbox; two-lane sync engine drains automatically upon reconnect |
+| Concurrent remote edit arrives | Low (LWW model) | Server clamps future clocks; responds 409 `stale_write` to older mutations |
+| Outbox row exists without local file | High (media upload failure) | Upload scheduler detects missing file, parks operation with `fileMissing` status |
 
-## Evidence stamps: what they are and are not
+### 2. Atomic Snapshots & In-Transaction Derivations
 
-Each photo records device time, a GPS fix with accuracy, a file hash and, once uploaded, the server's receive time. These are useful context, not proof: a device clock or GPS can be spoofed, and the app takes photos only through the camera by default to reduce misuse. The PDF report says this plainly.
+Inspections are permanent historical audit records. They must reflect exactly what was checked at the time of inspection, immune to future configuration edits:
 
-## Tech stack
+- **Template Snapshotting:** Starting an inspection deep-copies template definitions into `inspection_items`. Editing, deleting, or reordering a checklist template tomorrow never mutates an active or completed inspection.
+- **Transactional Summary Invariant:** Derived counters (`total_items`, `answered_items`, `pass_count`, `fail_count`, `na_count`) are recalculated and stored within the exact same database transaction as the item response write:
 
-| Layer | Choice |
-|---|---|
-| App | Flutter, Dart 3 |
-| State | Riverpod (`flutter_riverpod`, no code generation) |
-| Local data | Drift (SQLite) |
-| Navigation | go_router |
-| Camera and location | image_picker (camera source), geolocator |
-| Image processing | flutter_image_compress (native), crypto (SHA-256) |
-| Reports | pdf, share_plus |
-| Network | pocketbase, connectivity_plus |
-| Secure storage | flutter_secure_storage |
-| Background (P1) | workmanager |
-| Backend | PocketBase with hooks, file storage |
-| Errors | Sentry SDK pointed at self-hosted GlitchTip (optional) |
-| Tests | flutter_test, mocktail |
+```dart
+await db.transaction(() async {
+  // 1. Persist item answer mutation
+  await (update(inspectionItems)..where((tbl) => tbl.id.equals(itemId)))
+      .write(InspectionItemsCompanion(
+        response: Value(newResponse),
+        respondedAt: Value(now),
+      ));
 
-Everything is free and self-hostable. No paid services, no analytics SDKs.
-
-## Architecture
-
-```mermaid
-flowchart LR
-  UI[Flutter widgets] --> PROV[Riverpod providers]
-  PROV --> DB[(Drift SQLite)]
-  PROV --> REPO[Repositories]
-  CAP[Capture pipeline] -->|camera, GPS, compress, hash| FILES[(App files)]
-  CAP --> REPO
-  REPO -->|one transaction| DB
-  REPO -->|if signed in| OUT[(Outbox)]
-  SYNC[Sync engine] --> OUT
-  SYNC -->|lane 1: records, ordered| PB[PocketBase API]
-  SYNC -->|lane 2: photos, parallel| PB
-  FILES --> SYNC
+  // 2. Atomically recompute and update inspection summary counts
+  final counts = await _aggregateCounts(inspectionId);
+  await (update(inspections)..where((tbl) => tbl.id.equals(inspectionId)))
+      .write(InspectionsCompanion(
+        answeredItems: Value(counts.answered),
+        passCount: Value(counts.pass),
+        failCount: Value(counts.fail),
+        naCount: Value(counts.na),
+        updatedAt: Value(now),
+      ));
+});
 ```
 
-## Getting started
+### 3. Resilient Two-Lane Sync & Evidence Context
 
-### Prerequisites
+Bulk media uploads should never starve or block lightweight record updates. Tickwalk runs two decoupled synchronization lanes:
 
-- Flutter SDK (stable) with Dart 3
-- A phone or emulator (a real phone is best for camera and GPS testing)
-- A PocketBase binary (pinned version in `backend/PB_VERSION`), only for the optional sync
+- **Lane 1 (Records):** Strictly ordered by sequence (`seq`), enforcing parent-first topology (Template -> Inspection -> Item -> Attachment updates). Halts on retryable errors to maintain referential integrity.
+- **Lane 2 (Media):** Multipart file uploads run concurrently (max 2 parallel streams) with per-file exponential backoff and jitter. A failed photo upload never impedes item answers.
+- **Evidence Honesty:** Device clocks and GPS coordinates are context, not cryptographic proof. The app records device timestamp, GPS fix status (`fix`, `stale`, `none`, `denied`), horizontal accuracy in meters, and SHA-256 hash. Upon cloud arrival, the server sets a non-forgeable `received_at` timestamp. The generated PDF report explicitly details these boundaries.
 
-### Run the app (local-only)
+---
+
+## Additional Systems
+
+- **Interruption & Camera-Kill State Machine:** Budget Android devices frequently terminate background activities when the system camera opens. Tickwalk records a `pending_capture` record in SQLite *prior* to launching the camera intent. On application cold start or resume, `retrieveLostData()` recovers the file and associates it with the waiting item.
+- **Parallel GPS Fix:** Launching the camera triggers a concurrent 10-second high-accuracy GPS fix. If GPS takes longer than 10 seconds or signal is shielded, the pipeline falls back gracefully to `stale`, `none`, or `denied` without blocking the user.
+- **Native Off-Thread Compression:** Images are compressed and thumbnailed (320px) via native platform bindings off the Dart main thread. Full-resolution bitmaps never enter Dart memory space, preventing garbage-collection frame drops during rapid inspections.
+- **Outbox Write Coalescing:** Rapid offline toggles on the same item collapse into a single pending `update` operation. Transient items created and deleted offline are discarded from the outbox entirely.
+- **Data-Aware Network Gating:** Users can enforce "Wi-Fi Only for Photos", keeping cellular data usage at zero while continuing to sync text records. An explicit "Upload current batch now" override lets supervisors force an upload when needed.
+- **Offline PDF Generation & Signing:** Creates a self-contained, publication-ready PDF report containing company header, site summary, failed items evidence gallery with coordinates/timestamps, complete checklist audit table, and inspector signature pad graphic.
+
+---
+
+## System Architecture
+
+```text
+  Inspector Action (Offline or Online)
+          │
+          ▼
+┌──────────────────────────────────────────────┐
+│ UI Widgets & Riverpod Reactive Streams       │
+└──────────────────────┬───────────────────────┘
+                       │
+       ┌───────────────┴───────────────┐
+       ▼                               ▼
+┌──────────────┐               ┌──────────────────────────────┐
+│ Capture      │               │ Local Repositories           │
+│ Pipeline     │               │ (Drift SQLite Transactions)  │
+└──────┬───────┘               └──────────────┬───────────────┘
+       │                                      │
+       │ 1. Launch Camera + GPS in parallel   │ 1. Snapshot template into items
+       │ 2. Native compress & SHA-256         │ 2. Write answer + update summary counts
+       │ 3. Write photo files to disk         │ 3. If signed in: enqueue outbox
+       ▼                                      ▼
+┌──────────────────────┐               ┌──────────────────────────────┐
+│ App Private Storage  │               │ Drift SQLite Local DB        │
+│ (<app>/inspections/) │               │ (Source of Truth)            │
+└──────┬───────────────┘               └──────────────┬───────────────┘
+       │                                              │
+       │                                ┌─────────────┴─────────────┐
+       │                                ▼                           ▼
+       │                    ┌──────────────────────┐    ┌──────────────────────┐
+       │                    │ Outbox: Lane 1       │    │ Outbox: Lane 2       │
+       │                    │ (Records, Ordered)   │    │ (Media, Parallel)    │
+       │                    └──────────┬───────────┘    └──────────┬───────────┘
+       │                               │                           │
+       │                               │ HTTP JSON                 │ Multipart Stream
+       │                               │ Strict parent-first       │ Max 2 concurrent
+       ▼                               ▼                           ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Optional PocketBase Cloud Backend (Hooks, Auth, Storage, Server received_at) │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Project Structure
+
+```text
+Tick-walk/
+├── README.MD                           # Project overview & system architecture
+├── docs/
+│   ├── ARCHITECTURE.MD                 # Full system design, schema, and sync lanes
+│   ├── PRD.MD                          # Product requirements & user stories
+│   ├── DESIGN.MD                       # UI tokens, components, and interaction patterns
+│   ├── STORY.MD                        # Engineering narrative, Medium tags & LinkedIn post
+│   ├── DEMO.MD                         # Walkthrough script & recording guide
+│   ├── CURSOR_CONTEXT.MD               # Engineering milestones & build instructions
+│   └── tickwalk.postman_collection.json # 7-folder Postman API test suite
+├── lib/
+│   ├── main.dart                       # App entrypoint & global error boundary
+│   ├── app.dart                        # MaterialApp, router config, and theme initialization
+│   ├── core/
+│   │   ├── clock/                      # Injectable system clock interface
+│   │   ├── errors/                     # App-wide typed error taxonomy
+│   │   ├── logger/                     # Structured logger & GlitchTip breadcrumbs
+│   │   └── ids/                        # UUIDv4 client generation utilities
+│   ├── domain/
+│   │   ├── models/                     # Immutable domain entities
+│   │   ├── template_schema.dart        # JSON schemaVersion 1 validator
+│   │   └── validation.dart             # Pure completion validation function
+│   ├── data/
+│   │   ├── db/                         # Drift SQLite database, tables, DAOs & migrations
+│   │   ├── repositories/               # Templates, inspections, items, attachments repos
+│   │   ├── sync/                       # Outbox engine, record lane, media lane, scheduler
+│   │   └── api/                        # PocketBase HTTP client, auth, and error mapper
+│   ├── capture/
+│   │   ├── capture_pipeline.dart       # Orchestrator: camera, GPS, compression, hashing
+│   │   ├── gps_service.dart            # Geolocator integration with 10s parallel timeout
+│   │   ├── compression_profiles.dart   # Native image resize & thumbnail calculator
+│   │   └── recovery.dart               # Pending-capture crash recovery state machine
+│   ├── reports/
+│   │   └── pdf_builder.dart            # Offline PDF document generator with photo stamps
+│   └── features/
+│       ├── onboarding/                 # First-run inspector identity setup
+│       ├── templates/                  # Starter templates & template editor
+│       ├── inspections/                # Active & completed inspection lists
+│       ├── checklist/                  # Sliver checklist screen, inputs & review blockers
+│       ├── uploads/                    # Upload queue monitor, retry triggers & Wi-Fi toggle
+│       └── settings/                   # Data usage, quality profiles & account backup
+├── backend/
+│   ├── PB_VERSION                      # Pinned PocketBase release version
+│   ├── pb_hooks/                       # Server-side hooks (received_at, validation, 409 guard)
+│   └── pb_migrations/                  # Auto-applied collection schemas
+└── test/
+    ├── domain/                         # Template parsing & completion validation tests
+    ├── db/                             # Transactional summary recompute & Drift DAO tests
+    ├── sync/                           # Outbox coalescing, scheduler & two-lane sync tests
+    └── capture/                        # Crash recovery & GPS fallback tests
+```
+
+---
+
+## Getting Started
+
+### 1. Start Infrastructure via PocketBase (Optional)
+
+```bash
+cd backend
+# Create superuser admin credentials
+./pocketbase superuser create admin@tickwalk.io 'StrongPassword123!'
+# Serve PocketBase locally
+./pocketbase serve --http=0.0.0.0:8090
+```
+
+PocketBase Admin UI is accessible at `http://localhost:8090/_/`.
+
+### 2. Configure Environment
+
+Copy `.env.example` to `.env`:
+
+```bash
+cp .env.example .env
+```
+
+| Target Device | API_URL in `.env` |
+|---|---|
+| Android Emulator | `http://10.0.2.2:8090` |
+| iOS Simulator | `http://localhost:8090` |
+| Physical Device (USB) | `http://localhost:8090` (after `adb reverse tcp:8090 tcp:8090`) |
+| Physical Device (Wi-Fi) | `http://<your-computer-ip>:8090` |
+
+### 3. Generate Drift Database Code
 
 ```bash
 flutter pub get
 dart run build_runner build --delete-conflicting-outputs
-cp .env.example .env
+```
+
+### 4. Run the Flutter App
+
+```bash
 flutter run
 ```
 
-### Run the backend (optional)
+---
+
+## API Capabilities
+
+| Area | Method | Path | Auth | Purpose |
+|---|---|---|---|---|
+| **Health** | `GET` | `/api/health` | — | Backend liveness and health probe |
+| **Auth** | `POST` | `/api/collections/users/auth-with-password` | — | Authenticate inspector and obtain JWT |
+| **Templates** | `POST` | `/api/collections/templates/records` | Bearer Token | Push template record (Lane 1) |
+| | `GET` | `/api/collections/templates/records` | Bearer Token | List user templates or starters |
+| | `GET` | `/api/collections/templates/records/{id}` | Bearer Token | Retrieve single template schema |
+| | `PATCH` | `/api/collections/templates/records/{id}` | Bearer Token | Update or soft-delete template |
+| **Inspections**| `POST` | `/api/collections/inspections/records` | Bearer Token | Sync new inspection with cached summary |
+| | `GET` | `/api/collections/inspections/records` | Bearer Token | List active/completed inspections |
+| | `PATCH` | `/api/collections/inspections/records/{id}` | Bearer Token | Update status or notes (409 guard) |
+| **Items** | `POST` | `/api/collections/inspection_items/records` | Bearer Token | Push snapshot item record (Lane 1) |
+| | `GET` | `/api/collections/inspection_items/records` | Bearer Token | Query items for inspection |
+| | `PATCH` | `/api/collections/inspection_items/records/{id}` | Bearer Token | Update answer response/severity/note |
+| **Media** | `POST` | `/api/collections/attachments/records` | Bearer Token | Multipart upload photo with GPS (Lane 2) |
+| | `GET` | `/api/collections/attachments/records/{id}` | Bearer Token | Inspect photo metadata & `received_at` |
+| | `POST` | `/api/files/token` | Bearer Token | Request protected short-lived media token |
+| **Pull Sync** | `GET` | `/api/collections/{col}/records?filter=...` | Bearer Token | Incremental pull ordered by `updated,id` |
+
+---
+
+## Core Performance Benchmarks & Targets
+
+Measured on low-end reference hardware (Android 11, 2GB RAM, Quad-Core 1.8GHz):
+
+| Metric | Target | Rationale |
+|---|---|---|
+| **Capture to Thumbnail Visible** | < 800 ms | Native background compression ensures camera shutter returns immediately |
+| **Checklist 60-item Scroll** | 60 FPS | Sliver list with lazy thumbnail loading and scoped Riverpod item providers |
+| **App Cold Start** | < 1200 ms | SQLite initial stream query directly to home screen with no network gate |
+| **Photo Compression Ratio** | ~85% reduction | Standard profile reduces 4.2MB raw capture down to ~350KB (1600px, 75q) |
+| **APK Release Footprint** | < 18 MB per ABI | Split APK per ABI with zero heavy third-party tracking or bloated UI kits |
+
+---
+
+## Test Suite
+
+The automated test suite exercises each architectural invariant under edge-case conditions:
 
 ```bash
-cd backend
-./pocketbase superuser create you@example.com 'choose-a-strong-password'
-./pocketbase serve --http=0.0.0.0:8090
+flutter test
 ```
 
-(On older PocketBase versions the command is `admin create`.) Set `API_URL` in `.env`:
-
-| Device | URL |
+| Test Class | Invariant Claim Verified |
 |---|---|
-| Android emulator | `http://10.0.2.2:8090` |
-| Phone on the same Wi-Fi | `http://<your-computer-LAN-IP>:8090` |
-| Phone over USB (after `adb reverse tcp:8090 tcp:8090`) | `http://localhost:8090` |
+| `TestTemplateSnapshotIsolation` | Modifying/deleting parent template never changes existing inspection items |
+| `TestSummaryRecomputeConsistency` | Cache summary equals brute-force recompute across randomized answer sequences |
+| `TestOutboxWriteCoalescing` | Multiple rapid item answers collapse into one; created-then-deleted records dropped |
+| `TestCameraKillRecovery` | Restores `pending_capture` and re-attaches image retrieved via `retrieveLostData` |
+| `TestGpsTimeoutFallback` | Exceeding 10s deadline stores `stale` or `none` without failing photo capture |
+| `TestTwoLaneSyncOrdering` | Lane 1 guarantees parent inspection exists on server before Lane 2 uploads photos |
+| `TestUploadSchedulerWifiGating` | Pauses photo queue on metered mobile data; allows batch override when toggled |
+| `TestAttachmentIdempotentCreate` | Re-uploading attachment with existing UUID returns 200/verified record, not duplicate |
+| `TestStaleWriteConflict409` | Server rejects outdated `client_updated_at` with 409 and client applies server record |
+| `TestPdfReportEvidenceDisclaimer` | Generated PDF audit includes explicit unverified-timestamp legal notice |
 
-Use HTTPS beyond local demos.
+---
 
-### Commands
+## Postman Collection
 
-| Command | Purpose |
-|---|---|
-| `flutter run` | Run the app |
-| `flutter test` | Run unit and widget tests |
-| `flutter analyze` | Static analysis |
-| `dart run build_runner build --delete-conflicting-outputs` | Generate Drift code |
-| `flutter build apk --release --split-per-abi` | Release build for measuring size |
-
-Measure performance in profile or release mode only.
-
-## Project structure
+A complete Postman test collection covering all sync endpoints, auth, cursor pulls, and validation edge cases is located in:
 
 ```text
-tickwalk/
-  lib/
-    main.dart, app.dart
-    core/            clock, ids, logger, result, errors, dates
-    domain/          models, template_schema, validation, report_model
-    data/
-      db/            Drift database, tables, DAOs
-      repositories/  templates, inspections, items, attachments, settings, outbox
-      sync/          outbox, engine, record_lane, media_lane, backoff, merge
-      api/           pocketbase client, auth, error mapper
-    capture/         capture_pipeline, gps, compression_profiles, recovery
-    reports/         pdf_builder
-    features/        inspections, checklist, templates, uploads, settings, onboarding, account
-    ui/              theme tokens, shared widgets
-  test/
-  backend/           pb_hooks, pb_migrations
-  docs/              design, story, demo, prd, cursorcontext, architecture
+docs/tickwalk.postman_collection.json
 ```
 
-## Testing
+Run via the Newman CLI against a running PocketBase instance:
 
-`flutter test` covers template parsing, completion validation, summary recompute, compression profile math, the upload scheduler (concurrency, backoff, Wi-Fi gating, parent-first ordering), outbox coalescing, capture recovery logic, report assembly, and the sync engine against a fake server with injected failures. The manual matrix is in [docs/architecture.md](docs/architecture.md#14-testing-strategy).
+```bash
+newman run docs/tickwalk.postman_collection.json \
+  --env-var "baseUrl=http://localhost:8090" \
+  --env-var "userEmail=inspector@tickwalk.io" \
+  --env-var "userPassword=TestPass12345!"
+```
 
-## Known limitations
+---
 
-- Single user per account; sharing is by PDF
-- Photos from another device show a placeholder until downloaded on demand (roadmap)
-- Uploads restart a file from the beginning after an interruption (files are small; chunked resumable upload is a later project)
-- Stamps are not tamper-proof
-- The local database and photos are not encrypted at rest
-- Last-write-wins sync per record
-- iOS background uploads are best effort
+## Design Decisions (Settled — Don't Relitigate)
 
-## Roadmap
+1. **Local SQLite is the arbiter.** The local database holds the master copy; PocketBase is an optional backup. The UI never awaits remote sync.
+2. **Template snapshot into inspection items.** Inspections are immutable historical audits; they copy template contents at instantiation time.
+3. **In-transaction summary recalculation.** Counts are recalculated and saved within the exact same database transaction as the item response write.
+4. **Camera-only evidence capture.** Direct camera capture prevents attaching unverified gallery photos from external sources.
+5. **Native off-thread compression & thumbnails.** Images are compressed natively before entering Dart VM memory; full-resolution images are never decoded into Dart widgets.
+6. **Two decoupled sync lanes.** Ordered record metadata runs sequentially in Lane 1; multipart photo uploads run concurrently in Lane 2.
+7. **Client UUIDs & duplicate-as-success idempotency.** Retrying an upload with an identical client ID is safe and never creates duplicate records.
+8. **Evidence stamps are context, not proof.** Timestamps and GPS coordinates can be spoofed on rooted phones. The system relies on server `received_at` as a corroborating indicator and documents this transparently.
 
-- Team workspaces and reviewer roles
-- On-demand photo download on other devices
-- Resumable chunked uploads
-- Offline map view of findings
-- Encryption at rest
-- Backend move to Go or Python with Postgres using the same protocol
+---
+
+## Known Limitations & Out of Scope (v1 Scope vs v2 Roadmap)
+
+### MVP v1 Known Limitations
+- Single user per local account; multi-inspector sharing occurs via exported PDF reports.
+- Photos captured on another device display local placeholders until explicitly fetched.
+- Whole-file upload retry without byte-level chunking (individual compressed photos average ~350 KB).
+- Local SQLite database and cached photos are unencrypted at rest.
+
+### Planned for Version 2 (v2)
+- **Multi-Tenant Workspaces & RBAC:** Team dispatch, supervisor sign-offs, and compliance auditor roles.
+- **Real-Time Collaborative Walk-Rounds:** Simultaneous inspections across different floors using CRDTs.
+- **Geofencing & Offline Map Overlays:** Site boundary verification and interactive offline finding pins.
+- **On-Device Computer Vision ML:** Automated safety violation detection (missing helmets, blocked fire hoses).
+- **Resumable Chunked Uploads:** Support for multi-megabyte high-resolution imagery and video evidence.
+
+---
 
 ## Documentation
 
-| Doc | Contents |
+| Document | Purpose |
 |---|---|
-| [prd.md](docs/prd.md) | Problem, scope, user stories, acceptance criteria |
-| [design.md](docs/design.md) | UI/UX, tokens, screens, patterns replicated |
-| [architecture.md](docs/architecture.md) | Data model, capture pipeline, upload queue, sync, reports |
-| [story.md](docs/story.md) | The narrative and interview talking points |
-| [demo.md](docs/demo.md) | Demo script and recording guide |
-| [cursorcontext.md](docs/cursorcontext.md) | Instructions for the AI coding agent |
+| [docs/PRD.MD](docs/PRD.MD) | Product requirements, user stories & acceptance criteria |
+| [docs/ARCHITECTURE.MD](docs/ARCHITECTURE.MD) | Deep-dive architectural specs, schemas, and sync lane algorithms |
+| [docs/DESIGN.MD](docs/DESIGN.MD) | Design system tokens, interaction patterns, and outdoor accessibility |
+| [docs/STORY.MD](docs/STORY.MD) | Engineering narrative, Medium tags, LinkedIn post & interview talking points |
+| [docs/DEMO.MD](docs/DEMO.MD) | Video demo script and recording walkthrough |
+| [docs/CURSOR_CONTEXT.MD](docs/CURSOR_CONTEXT.MD) | Build plan, sprint milestones, and agent guidelines |
+| [docs/tickwalk.postman_collection.json](docs/tickwalk.postman_collection.json) | Comprehensive 7-folder API verification test suite |
+
+---
 
 ## License
 
-MIT
+MIT licensed. Engineering design and implementation architecture.

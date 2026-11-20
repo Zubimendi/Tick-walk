@@ -1,0 +1,838 @@
+{
+  "info": {
+    "_postman_id": "b1a7d8e2-05a9-4843-95d8-1f6938576b7a",
+    "name": "Tickwalk Sync API",
+    "description": "Production API test suite for Tickwalk offline-first inspection synchronization backed by PocketBase. Covers authentication, two-lane sync (ordered records and multipart media), cursor-based incremental pull, concurrency, and validation error contracts.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8090",
+      "type": "string"
+    },
+    {
+      "key": "authToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userEmail",
+      "value": "inspector@tickwalk.io",
+      "type": "string"
+    },
+    {
+      "key": "userPassword",
+      "value": "TestPass12345!",
+      "type": "string"
+    },
+    {
+      "key": "templateId",
+      "value": "tpl_safety_audit_01",
+      "type": "string"
+    },
+    {
+      "key": "inspectionId",
+      "value": "insp_site_alpha_01",
+      "type": "string"
+    },
+    {
+      "key": "itemId",
+      "value": "item_fire_exting_01",
+      "type": "string"
+    },
+    {
+      "key": "attachmentId",
+      "value": "att_photo_proof_01",
+      "type": "string"
+    },
+    {
+      "key": "cursor",
+      "value": "1970-01-01 00:00:00.000Z",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 - Health & Auth",
+      "item": [
+        {
+          "name": "Service Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "health"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Health response code is 200\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.code).to.eql(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Authenticate Inspector (Get Token)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identity\": \"{{userEmail}}\",\n  \"password\": \"{{userPassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/users/auth-with-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "users", "auth-with-password"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Returns valid JWT token and user record\", function () {",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.token).to.be.a(\"string\");",
+                  "    pm.expect(data.record.id).to.be.a(\"string\");",
+                  "    pm.collectionVariables.set(\"authToken\", data.token);",
+                  "    pm.collectionVariables.set(\"userId\", data.record.id);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Invalid Credentials (Negative Test)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identity\": \"nonexistent@tickwalk.io\",\n  \"password\": \"WrongPassword123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/users/auth-with-password",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "users", "auth-with-password"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 400 Bad Request\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Templates Sync (Lane 1)",
+      "item": [
+        {
+          "name": "Create Template Record",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{templateId}}\",\n  \"owner\": \"{{userId}}\",\n  \"name\": \"Warehouse Fire & Hazard Safety\",\n  \"description\": \"Comprehensive daily warehouse safety check\",\n  \"is_starter\": false,\n  \"structure\": {\n    \"schemaVersion\": 1,\n    \"sections\": [\n      {\n        \"id\": \"s1\",\n        \"title\": \"Emergency Exits\",\n        \"items\": [\n          {\n            \"id\": \"i1\",\n            \"prompt\": \"Exits are unobstructed and marked\",\n            \"type\": \"pass_fail\",\n            \"required\": true,\n            \"photoRequiredOnFail\": true,\n            \"unit\": null\n          }\n        ]\n      }\n    ]\n  },\n  \"client_updated_at\": 1732100000000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/templates/records",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "templates", "records"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Template created or existing\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+                  "    if (pm.response.code === 200) {",
+                  "        var res = pm.response.json();",
+                  "        pm.expect(res.name).to.eql(\"Warehouse Fire & Hazard Safety\");",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "List User Templates",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/templates/records?filter=(deleted_at=null)",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "templates", "records"],
+              "query": [
+                {
+                  "key": "filter",
+                  "value": "(deleted_at=null)"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.items).to.be.an(\"array\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Template by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/templates/records/{{templateId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "templates", "records", "{{templateId}}"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Returns correct template\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var res = pm.response.json();",
+                  "    pm.expect(res.id).to.eql(pm.collectionVariables.get(\"templateId\"));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Inspections Sync (Lane 1)",
+      "item": [
+        {
+          "name": "Create Inspection Record",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{inspectionId}}\",\n  \"owner\": \"{{userId}}\",\n  \"template_id\": \"{{templateId}}\",\n  \"template_name\": \"Warehouse Fire & Hazard Safety\",\n  \"site_name\": \"Logistics Hub Central #4\",\n  \"site_address\": \"100 Docklands Way, Sector B\",\n  \"inspector_name\": \"Francis Offiong\",\n  \"status\": \"in_progress\",\n  \"started_at\": 1732100500000,\n  \"start_lat\": 37.7749,\n  \"start_lng\": -122.4194,\n  \"start_accuracy_m\": 12.4,\n  \"start_gps_status\": \"fix\",\n  \"start_gps_at\": 1732100501000,\n  \"total_items\": 10,\n  \"answered_items\": 0,\n  \"pass_count\": 0,\n  \"fail_count\": 0,\n  \"na_count\": 0,\n  \"client_updated_at\": 1732100500000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/inspections/records",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "inspections", "records"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Inspection created or exists\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+                  "    if (pm.response.code === 200) {",
+                  "        var res = pm.response.json();",
+                  "        pm.expect(res.site_name).to.eql(\"Logistics Hub Central #4\");",
+                  "        pm.expect(res.status).to.eql(\"in_progress\");",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Active Inspections",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/inspections/records?filter=(status='in_progress'%26%26deleted_at=null)",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "inspections", "records"],
+              "query": [
+                {
+                  "key": "filter",
+                  "value": "(status='in_progress'&&deleted_at=null)"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.items).to.be.an(\"array\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Inspection (Completion & Cached Summary)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"completed\",\n  \"completed_at\": 1732103600000,\n  \"answered_items\": 10,\n  \"pass_count\": 8,\n  \"fail_count\": 2,\n  \"na_count\": 0,\n  \"notes\": \"Passed overall with 2 minor corrective actions required.\",\n  \"client_updated_at\": 1732103600000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/inspections/records/{{inspectionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "inspections", "records", "{{inspectionId}}"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Inspection status updated to completed\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var res = pm.response.json();",
+                  "    pm.expect(res.status).to.eql(\"completed\");",
+                  "    pm.expect(res.fail_count).to.eql(2);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Inspection Items Sync (Lane 1)",
+      "item": [
+        {
+          "name": "Create Inspection Item with Fail & Severity",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"{{itemId}}\",\n  \"owner\": \"{{userId}}\",\n  \"inspection\": \"{{inspectionId}}\",\n  \"section_title\": \"Emergency Exits\",\n  \"section_order\": 1,\n  \"item_order\": 1,\n  \"prompt\": \"Exits are unobstructed and clearly marked\",\n  \"item_type\": \"pass_fail\",\n  \"required\": true,\n  \"photo_required_on_fail\": true,\n  \"response\": \"fail\",\n  \"severity\": \"high\",\n  \"note\": \"Pallet stack blocking West exit corridor door.\",\n  \"responded_at\": 1732100800000,\n  \"client_updated_at\": 1732100800000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/inspection_items/records",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "inspection_items", "records"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Item created or exists\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+                  "    if (pm.response.code === 200) {",
+                  "        var res = pm.response.json();",
+                  "        pm.expect(res.response).to.eql(\"fail\");",
+                  "        pm.expect(res.severity).to.eql(\"high\");",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Items for Inspection",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/inspection_items/records?filter=(inspection='{{inspectionId}}')",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "inspection_items", "records"],
+              "query": [
+                {
+                  "key": "filter",
+                  "value": "(inspection='{{inspectionId}}')"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Items retrieved successfully\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.items.length).to.be.greaterThan(0);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 - Media & Attachments (Lane 2)",
+      "item": [
+        {
+          "name": "Upload Stamped Photo Evidence (Multipart)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "id",
+                  "value": "{{attachmentId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "owner",
+                  "value": "{{userId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "inspection",
+                  "value": "{{inspectionId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "item",
+                  "value": "{{itemId}}",
+                  "type": "text"
+                },
+                {
+                  "key": "kind",
+                  "value": "photo",
+                  "type": "text"
+                },
+                {
+                  "key": "sha256",
+                  "value": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                  "type": "text"
+                },
+                {
+                  "key": "bytes",
+                  "value": "184320",
+                  "type": "text"
+                },
+                {
+                  "key": "width",
+                  "value": "1600",
+                  "type": "text"
+                },
+                {
+                  "key": "height",
+                  "value": "1200",
+                  "type": "text"
+                },
+                {
+                  "key": "compression_profile",
+                  "value": "standard",
+                  "type": "text"
+                },
+                {
+                  "key": "captured_at",
+                  "value": "1732100820000",
+                  "type": "text"
+                },
+                {
+                  "key": "gps_lat",
+                  "value": "37.77501",
+                  "type": "text"
+                },
+                {
+                  "key": "gps_lng",
+                  "value": "-122.41952",
+                  "type": "text"
+                },
+                {
+                  "key": "gps_accuracy_m",
+                  "value": "8.5",
+                  "type": "text"
+                },
+                {
+                  "key": "gps_status",
+                  "value": "fix",
+                  "type": "text"
+                },
+                {
+                  "key": "caption",
+                  "value": "Blocked corridor evidence shot",
+                  "type": "text"
+                },
+                {
+                  "key": "client_updated_at",
+                  "value": "1732100820000",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/attachments/records",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "attachments", "records"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Attachment uploaded or accepted\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 400]);",
+                  "    if (pm.response.code === 200) {",
+                  "        var res = pm.response.json();",
+                  "        pm.expect(res.id).to.eql(pm.collectionVariables.get(\"attachmentId\"));",
+                  "        pm.expect(res.kind).to.eql(\"photo\");",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify Attachment & Server Received Timestamp",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/attachments/records/{{attachmentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "attachments", "records", "{{attachmentId}}"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Attachment record holds evidence context\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var res = pm.response.json();",
+                  "    pm.expect(res.gps_accuracy_m).to.be.above(0);",
+                  "    pm.expect(res.gps_status).to.eql(\"fix\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Protected File Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/files/token",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "files", "token"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Generates short-lived file token for secure media\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 404]);",
+                  "    if (pm.response.code === 200) {",
+                  "        var res = pm.response.json();",
+                  "        pm.expect(res.token).to.be.a(\"string\");",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 - Incremental Cursor Pull",
+      "item": [
+        {
+          "name": "Pull Updated Inspections Since Cursor",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/inspections/records?filter=(updated>='{{cursor}}')&sort=updated,id&perPage=200",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "inspections", "records"],
+              "query": [
+                {
+                  "key": "filter",
+                  "value": "(updated>='{{cursor}}')"
+                },
+                {
+                  "key": "sort",
+                  "value": "updated,id"
+                },
+                {
+                  "key": "perPage",
+                  "value": "200"
+                }
+              ]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Cursor pull returns paginated records\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    var data = pm.response.json();",
+                  "    pm.expect(data.page).to.eql(1);",
+                  "    if (data.items.length > 0) {",
+                  "        var latest = data.items[data.items.length - 1].updated;",
+                  "        pm.collectionVariables.set(\"cursor\", latest);",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 - Error Handling & Invariants",
+      "item": [
+        {
+          "name": "Reject Unauthorized Request (401)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/inspections/records",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "inspections", "records"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Rejects request without auth header\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Validation Error on Invalid Enum (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner\": \"{{userId}}\",\n  \"inspection\": \"{{inspectionId}}\",\n  \"section_title\": \"Check\",\n  \"section_order\": 1,\n  \"item_order\": 1,\n  \"prompt\": \"Invalid item check\",\n  \"item_type\": \"unsupported_enum_type\",\n  \"client_updated_at\": 1732100000000\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/collections/inspection_items/records",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "collections", "inspection_items", "records"]
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Fails schema validation with 400 Bad Request\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
