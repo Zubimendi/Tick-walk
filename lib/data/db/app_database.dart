@@ -5,6 +5,7 @@ import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../starter_templates.dart';
 import 'tables.dart';
 
 part 'app_database.g.dart';
@@ -48,6 +49,9 @@ class AppDatabase extends _$AppDatabase {
           await into(settings).insert(
             SettingsCompanion.insert(key: 'onboarding_done', value: 'false'),
           );
+
+          // Seed starter templates (Appendix A)
+          await seedStarterTemplates(this);
         },
         beforeOpen: (details) async {
           await customStatement('PRAGMA foreign_keys = ON');
