@@ -6,6 +6,7 @@ import '../../core/ids.dart';
 import '../../core/result.dart';
 import '../../domain/models.dart';
 import '../../domain/template_schema.dart';
+import '../../domain/validation.dart';
 import '../db/app_database.dart' as db;
 import 'mappers.dart';
 
@@ -237,11 +238,61 @@ class InspectionRepository {
     }
   }
 
+  /// Validates whether an inspection can be marked completed.
+  /// Returns the list of blockers (if any).
+  Future<Result<List<CompletionBlocker>>> validateCanComplete(String id) async {
+    try {
+      final itemsRows = await (_db.select(_db.inspectionItems)..where((t) => t.inspectionId.equals(id))).get();
+      final items = itemsRows.map(inspectionItemFromRow).toList();
+
+      final attRows = await (_db.select(_db.attachments)
+            ..where((t) => t.inspectionId.equals(id))
+            ..where((t) => t.deletedAt.isNull())
+            ..where((t) => t.kind.equals('photo')))
+          .get();
+
+      final photoCountMap = <String, int>{};
+      for (final att in attRows) {
+        if (att.itemId != null) {
+          photoCountMap[att.itemId!] = (photoCountMap[att.itemId!] ?? 0) + 1;
+        }
+      }
+
+      final blockers = validateCompletion(
+        items: items,
+        photoCountByItem: photoCountMap,
+      );
+
+      return Ok(blockers);
+    } on Object catch (e) {
+      return Err(AppError(
+        klass: ErrorClass.local,
+        message: 'Failed to validate completion',
+        cause: e,
+      ));
+    }
+  }
+
   /// Marks an inspection completed and records completed_at.
+  /// Rejects completion if any validation blockers exist.
   Future<Result<void>> completeInspection(String id) async {
     final now = _clock.nowMillis();
     final inspectionRes = await getInspection(id);
     if (inspectionRes.isErr) return Err(inspectionRes.errorOrNull!);
+
+    // Run completion validation
+    final validationRes = await validateCanComplete(id);
+    if (validationRes.isErr) return Err(validationRes.errorOrNull!);
+
+    final blockers = validationRes.valueOrNull!;
+    if (blockers.isNotEmpty) {
+      final reasons = blockers.map((b) => b.description).join('; ');
+      return Err(AppError(
+        klass: ErrorClass.validation,
+        message: 'Cannot complete inspection: $reasons',
+        cause: blockers,
+      ));
+    }
 
     try {
       await (_db.update(_db.inspections)..where((t) => t.id.equals(id))).write(
