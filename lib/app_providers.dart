@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'capture/capture_pipeline.dart';
+import 'capture/gps_service.dart';
 import 'core/clock.dart';
 import 'data/db/app_database.dart' hide Template, Inspection, InspectionItem, Attachment;
 import 'data/repositories/attachment_repository.dart';
@@ -41,11 +42,16 @@ final attachmentRepositoryProvider = Provider<AttachmentRepository>((ref) {
   );
 });
 
+final gpsServiceProvider = Provider<GpsService>((ref) {
+  return GpsService();
+});
+
 final capturePipelineProvider = Provider<CapturePipeline>((ref) {
   return CapturePipeline(
     attachmentRepository: ref.watch(attachmentRepositoryProvider),
     settingsRepository: ref.watch(settingsRepositoryProvider),
     clock: ref.watch(clockProvider),
+    gpsFixProvider: ref.watch(gpsServiceProvider),
   );
 });
 
