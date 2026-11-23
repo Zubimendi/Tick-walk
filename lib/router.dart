@@ -2,15 +2,41 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'app_providers.dart';
+import 'features/checklist/checklist_screen.dart';
 import 'features/inspections/inspections_screen.dart';
+import 'features/onboarding/onboarding_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/templates/templates_screen.dart';
 import 'features/uploads/uploads_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
+  final onboardingDone = ref.watch(onboardingDoneProvider);
+
   return GoRouter(
-    initialLocation: '/inspections',
+    initialLocation: onboardingDone ? '/inspections' : '/onboarding',
+    redirect: (context, state) {
+      final onOnboarding = state.uri.path == '/onboarding';
+      if (!onboardingDone && !onOnboarding) {
+        return '/onboarding';
+      }
+      if (onboardingDone && onOnboarding) {
+        return '/inspections';
+      }
+      return null;
+    },
     routes: [
+      GoRoute(
+        path: '/onboarding',
+        builder: (context, state) => const OnboardingScreen(),
+      ),
+      GoRoute(
+        path: '/inspections/:id',
+        builder: (context, state) {
+          final id = state.pathParameters['id']!;
+          return ChecklistScreen(inspectionId: id);
+        },
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
           return _ScaffoldWithNavBar(navigationShell: navigationShell);

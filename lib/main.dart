@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
+import 'app_providers.dart';
+import 'data/db/app_database.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final db = await AppDatabase.open();
 
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
@@ -16,8 +19,11 @@ void main() {
   };
 
   runApp(
-    const ProviderScope(
-      child: TickwalkApp(),
+    ProviderScope(
+      overrides: [
+        databaseProvider.overrideWithValue(db),
+      ],
+      child: const TickwalkApp(),
     ),
   );
 }
