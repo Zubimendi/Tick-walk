@@ -219,13 +219,20 @@ class _ChecklistScreenState extends ConsumerState<ChecklistScreen> {
                                     );
                                   }
                                 },
-                                onAddPhoto: () {
-                                  // Triggered by camera capture in Task T13
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Camera capture opens in Task T13'),
-                                    ),
-                                  );
+                                onAddPhoto: () async {
+                                  final res = await ref
+                                      .read(capturePipelineProvider)
+                                      .executeCapture(
+                                        inspectionId: widget.inspectionId,
+                                        itemId: item.id,
+                                      );
+                                  if (res.isErr && context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(res.errorOrNull!.message),
+                                      ),
+                                    );
+                                  }
                                 },
                               );
                             }),

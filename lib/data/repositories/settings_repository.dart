@@ -56,4 +56,12 @@ class SettingsRepository {
     final owner = await syncOwnerId();
     return owner != null && owner.isNotEmpty;
   }
+
+  Future<String?> pendingCapture() => get('pending_capture');
+
+  Future<void> setPendingCapture(String value) => set('pending_capture', value);
+
+  Future<void> clearPendingCapture() async {
+    await (_db.delete(_db.settings)..where((t) => t.key.equals('pending_capture'))).go();
+  }
 }

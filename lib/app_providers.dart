@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'capture/capture_pipeline.dart';
 import 'core/clock.dart';
 import 'data/db/app_database.dart' hide Template, Inspection, InspectionItem, Attachment;
+import 'data/repositories/attachment_repository.dart';
 import 'data/repositories/inspection_repository.dart';
 import 'data/repositories/settings_repository.dart';
 import 'data/repositories/template_repository.dart';
@@ -29,6 +31,21 @@ final inspectionRepositoryProvider = Provider<InspectionRepository>((ref) {
   return InspectionRepository(
     ref.watch(databaseProvider),
     ref.watch(clockProvider),
+  );
+});
+
+final attachmentRepositoryProvider = Provider<AttachmentRepository>((ref) {
+  return AttachmentRepository(
+    ref.watch(databaseProvider),
+    ref.watch(clockProvider),
+  );
+});
+
+final capturePipelineProvider = Provider<CapturePipeline>((ref) {
+  return CapturePipeline(
+    attachmentRepository: ref.watch(attachmentRepositoryProvider),
+    settingsRepository: ref.watch(settingsRepositoryProvider),
+    clock: ref.watch(clockProvider),
   );
 });
 
