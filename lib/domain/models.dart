@@ -437,6 +437,8 @@ class Attachment {
 
   bool get isUploaded => uploadedAt != null;
   bool get isDeleted => deletedAt != null;
+  bool get isPhoto => kind == AttachmentKind.photo;
+  bool get isSignature => kind == AttachmentKind.signature;
 
   Attachment copyWith({
     String? id,

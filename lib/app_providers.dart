@@ -6,6 +6,7 @@ import 'data/repositories/inspection_repository.dart';
 import 'data/repositories/settings_repository.dart';
 import 'data/repositories/template_repository.dart';
 import 'domain/models.dart';
+import 'domain/validation.dart';
 
 final clockProvider = Provider<Clock>((ref) => const SystemClock());
 
@@ -62,4 +63,22 @@ final singleInspectionProvider =
 final inspectionItemsProvider =
     StreamProvider.family<List<InspectionItem>, String>((ref, inspectionId) {
   return ref.watch(inspectionRepositoryProvider).watchItems(inspectionId);
+});
+
+final inspectionAttachmentsProvider =
+    StreamProvider.family<List<Attachment>, String>((ref, inspectionId) {
+  return ref.watch(inspectionRepositoryProvider).watchAttachments(inspectionId);
+});
+
+final inspectionPhotoCountsProvider =
+    StreamProvider.family<Map<String, int>, String>((ref, inspectionId) {
+  return ref.watch(inspectionRepositoryProvider).watchPhotoCountByItem(inspectionId);
+});
+
+final inspectionBlockersProvider =
+    Provider.family<List<CompletionBlocker>, String>((ref, inspectionId) {
+  final items = ref.watch(inspectionItemsProvider(inspectionId)).value ?? [];
+  final photoCounts =
+      ref.watch(inspectionPhotoCountsProvider(inspectionId)).value ?? {};
+  return validateCompletion(items: items, photoCountByItem: photoCounts);
 });

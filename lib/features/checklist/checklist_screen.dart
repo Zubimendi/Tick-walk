@@ -4,14 +4,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../app_providers.dart';
 import '../../domain/models.dart';
-import '../../domain/validation.dart';
 import '../../ui/tokens.dart';
 import '../../ui/widgets/gps_badge.dart';
 import '../../ui/widgets/progress_bar.dart';
 import 'checklist_item_widget.dart';
 import 'section_header_widget.dart';
 
-class ChecklistScreen extends ConsumerWidget {
+class ChecklistScreen extends ConsumerStatefulWidget {
   const ChecklistScreen({
     super.key,
     required this.inspectionId,
@@ -20,12 +19,35 @@ class ChecklistScreen extends ConsumerWidget {
   final String inspectionId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ChecklistScreen> createState() => _ChecklistScreenState();
+}
+
+class _ChecklistScreenState extends ConsumerState<ChecklistScreen> {
+  final Map<String, GlobalKey> _itemKeys = {};
+
+  void _jumpToItem(String itemId) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = _itemKeys[itemId];
+      if (key?.currentContext != null) {
+        Scrollable.ensureVisible(
+          key!.currentContext!,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeInOut,
+          alignment: 0.1,
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final tokens = context.tokens;
     final theme = Theme.of(context);
 
-    final inspectionAsync = ref.watch(singleInspectionProvider(inspectionId));
-    final itemsAsync = ref.watch(inspectionItemsProvider(inspectionId));
+    final inspectionAsync = ref.watch(singleInspectionProvider(widget.inspectionId));
+    final itemsAsync = ref.watch(inspectionItemsProvider(widget.inspectionId));
+    final photoCounts = ref.watch(inspectionPhotoCountsProvider(widget.inspectionId)).value ?? {};
+    final blockers = ref.watch(inspectionBlockersProvider(widget.inspectionId));
 
     return inspectionAsync.when(
       data: (inspection) {
@@ -164,10 +186,13 @@ class ChecklistScreen extends ConsumerWidget {
                               total: sectionItems.length,
                             ),
                             ...sectionItems.map((item) {
+                              final itemKey =
+                                  _itemKeys.putIfAbsent(item.id, GlobalKey.new);
+
                               return ChecklistItemWidget(
-                                key: ValueKey(item.id),
+                                key: itemKey,
                                 item: item,
-                                photoCount: 0, // Task T12 will connect attachment counts
+                                photoCount: photoCounts[item.id] ?? 0,
                                 isReadOnly: isReadOnly,
                                 onAnswerChanged: ({
                                   response,
@@ -195,10 +220,10 @@ class ChecklistScreen extends ConsumerWidget {
                                   }
                                 },
                                 onAddPhoto: () {
-                                  // Triggered by camera capture in Task T12
+                                  // Triggered by camera capture in Task T13
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
-                                      content: Text('Camera capture opens in Task T12'),
+                                      content: Text('Camera capture opens in Task T13'),
                                     ),
                                   );
                                 },
@@ -215,65 +240,67 @@ class ChecklistScreen extends ConsumerWidget {
               ),
             ],
           ),
-          bottomNavigationBar: itemsAsync.maybeWhen(
-            data: (items) {
-              final blockers = validateCompletion(
-                items: items,
-                photoCountByItem: const {},
-              );
-
-              return SafeArea(
-                child: Container(
-                  padding: EdgeInsets.all(tokens.screenPadding),
-                  decoration: BoxDecoration(
-                    color: tokens.surface,
-                    border: Border(top: BorderSide(color: tokens.border)),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              blockers.isEmpty
+          bottomNavigationBar: SafeArea(
+            child: Container(
+              padding: EdgeInsets.all(tokens.screenPadding),
+              decoration: BoxDecoration(
+                color: tokens.surface,
+                border: Border(top: BorderSide(color: tokens.border)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          isReadOnly
+                              ? 'Inspection Completed'
+                              : blockers.isEmpty
                                   ? 'All items complete'
                                   : '${blockers.length} blocker${blockers.length == 1 ? '' : 's'} remaining',
-                              style: theme.textTheme.labelLarge?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: blockers.isEmpty ? tokens.pass : tokens.warning,
-                              ),
-                            ),
-                            Text(
-                              blockers.isEmpty
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: isReadOnly
+                                ? tokens.textSecondary
+                                : blockers.isEmpty
+                                    ? tokens.pass
+                                    : tokens.warning,
+                          ),
+                        ),
+                        Text(
+                          isReadOnly
+                              ? 'View summary and results'
+                              : blockers.isEmpty
                                   ? 'Ready to complete walk-round'
                                   : 'Resolve required items & photos',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ],
+                          style: theme.textTheme.bodySmall,
                         ),
-                      ),
-                      FilledButton(
-                        onPressed: !isReadOnly
-                            ? () {
-                                context.push('/inspections/${inspection.id}/review');
-                              }
-                            : null,
-                        style: FilledButton.styleFrom(
-                          backgroundColor:
-                              blockers.isEmpty ? tokens.pass : tokens.primary,
-                        ),
-                        child: Text(
-                          isReadOnly ? 'Completed' : 'Review & Finish',
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              );
-            },
-            orElse: () => const SizedBox.shrink(),
+                  FilledButton(
+                    key: const ValueKey('review_and_finish_button'),
+                    onPressed: () async {
+                      final targetItemId = await context.push<String>(
+                        '/inspections/${inspection.id}/review',
+                      );
+                      if (targetItemId != null && mounted) {
+                        _jumpToItem(targetItemId);
+                      }
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor:
+                          blockers.isEmpty ? tokens.pass : tokens.primary,
+                    ),
+                    child: Text(
+                      isReadOnly ? 'Review & Summary' : 'Review & Finish',
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         );
       },

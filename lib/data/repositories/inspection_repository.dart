@@ -42,6 +42,32 @@ class InspectionRepository {
         .map((rows) => rows.map(inspectionItemFromRow).toList());
   }
 
+  Stream<List<Attachment>> watchAttachments(String inspectionId) {
+    return (_db.select(_db.attachments)
+          ..where((t) => t.inspectionId.equals(inspectionId))
+          ..where((t) => t.deletedAt.isNull())
+          ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
+        .watch()
+        .map((rows) => rows.map(attachmentFromRow).toList());
+  }
+
+  Stream<Map<String, int>> watchPhotoCountByItem(String inspectionId) {
+    return (_db.select(_db.attachments)
+          ..where((t) => t.inspectionId.equals(inspectionId))
+          ..where((t) => t.deletedAt.isNull())
+          ..where((t) => t.kind.equals('photo')))
+        .watch()
+        .map((rows) {
+          final counts = <String, int>{};
+          for (final row in rows) {
+            if (row.itemId != null) {
+              counts[row.itemId!] = (counts[row.itemId!] ?? 0) + 1;
+            }
+          }
+          return counts;
+        });
+  }
+
   Future<Result<Inspection>> getInspection(String id) async {
     final row = await (_db.select(_db.inspections)..where((t) => t.id.equals(id))).getSingleOrNull();
     if (row == null || row.deletedAt != null) {

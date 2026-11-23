@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'app_providers.dart';
 import 'features/checklist/checklist_screen.dart';
+import 'features/checklist/review_screen.dart';
 import 'features/inspections/inspections_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/settings/settings_screen.dart';
@@ -36,6 +37,15 @@ final routerProvider = Provider<GoRouter>((ref) {
           final id = state.pathParameters['id']!;
           return ChecklistScreen(inspectionId: id);
         },
+        routes: [
+          GoRoute(
+            path: 'review',
+            builder: (context, state) {
+              final id = state.pathParameters['id']!;
+              return ReviewScreen(inspectionId: id);
+            },
+          ),
+        ],
       ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) {
