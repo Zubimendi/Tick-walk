@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import '../../domain/models.dart';
 import '../../ui/tokens.dart';
@@ -12,6 +14,8 @@ class ChecklistItemWidget extends StatefulWidget {
     required this.isReadOnly,
     required this.onAnswerChanged,
     required this.onAddPhoto,
+    this.attachments = const [],
+    this.onPhotoTap,
   });
 
   final InspectionItem item;
@@ -25,6 +29,10 @@ class ChecklistItemWidget extends StatefulWidget {
     String? note,
   }) onAnswerChanged;
   final VoidCallback onAddPhoto;
+  /// Photos already attached to this item — drives the photo strip in the fail panel.
+  final List<Attachment> attachments;
+  /// Called when user taps a thumbnail; passes the attachment ID.
+  final void Function(String attachmentId)? onPhotoTap;
 
   @override
   State<ChecklistItemWidget> createState() => _ChecklistItemWidgetState();
@@ -301,6 +309,88 @@ class _ChecklistItemWidgetState extends State<ChecklistItemWidget> {
                     },
                   ),
                   SizedBox(height: tokens.space12),
+
+                  // Photo strip
+                  if (widget.attachments.isNotEmpty) ...[
+                    SizedBox(
+                      height: 72,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: widget.attachments.length,
+                        separatorBuilder: (context, index) => SizedBox(width: tokens.space8),
+                        itemBuilder: (context, index) {
+                          final att = widget.attachments[index];
+                          final hasThumb = att.thumbPath != null &&
+                              att.thumbPath!.isNotEmpty &&
+                              File(att.thumbPath!).existsSync();
+                          final hasLocal = att.localPath != null &&
+                              att.localPath!.isNotEmpty &&
+                              File(att.localPath!).existsSync();
+
+                          return Semantics(
+                            button: true,
+                            label: 'Photo evidence thumbnail ${index + 1}',
+                            child: InkWell(
+                              onTap: () => widget.onPhotoTap?.call(att.id),
+                              borderRadius: BorderRadius.circular(tokens.radiusCard),
+                              child: Container(
+                                width: 72,
+                                height: 72,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(tokens.radiusCard),
+                                  border: Border.all(color: tokens.border),
+                                  color: tokens.surface,
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    if (hasThumb || hasLocal)
+                                      Image.file(
+                                        File(hasThumb ? att.thumbPath! : att.localPath!),
+                                        fit: BoxFit.cover,
+                                        cacheWidth: 144,
+                                        errorBuilder: (context, error, stackTrace) => Center(
+                                          child: Icon(Icons.broken_image,
+                                              size: 24, color: tokens.textSecondary),
+                                        ),
+                                      )
+                                    else
+                                      Center(
+                                        child: Icon(Icons.photo,
+                                            size: 24, color: tokens.textSecondary),
+                                      ),
+                                    // Status icon badge overlay
+                                    Positioned(
+                                      top: 2,
+                                      right: 2,
+                                      child: Container(
+                                        padding: const EdgeInsets.all(2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(alpha: 0.6),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(
+                                          att.isUploaded
+                                              ? Icons.cloud_done
+                                              : Icons.access_time,
+                                          size: 12,
+                                          color: att.isUploaded
+                                              ? tokens.pass
+                                              : Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    SizedBox(height: tokens.space12),
+                  ],
 
                   // Photo action button
                   OutlinedButton.icon(

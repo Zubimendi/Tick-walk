@@ -47,6 +47,7 @@ class _ChecklistScreenState extends ConsumerState<ChecklistScreen> {
     final inspectionAsync = ref.watch(singleInspectionProvider(widget.inspectionId));
     final itemsAsync = ref.watch(inspectionItemsProvider(widget.inspectionId));
     final photoCounts = ref.watch(inspectionPhotoCountsProvider(widget.inspectionId)).value ?? {};
+    final attachments = ref.watch(inspectionAttachmentsProvider(widget.inspectionId)).value ?? [];
     final blockers = ref.watch(inspectionBlockersProvider(widget.inspectionId));
 
     return inspectionAsync.when(
@@ -193,6 +194,14 @@ class _ChecklistScreenState extends ConsumerState<ChecklistScreen> {
                                 key: itemKey,
                                 item: item,
                                 photoCount: photoCounts[item.id] ?? 0,
+                                attachments: attachments
+                                    .where((a) => a.itemId == item.id)
+                                    .toList(),
+                                onPhotoTap: (attId) {
+                                  context.push(
+                                    '/inspections/${inspection.id}/photos/$attId',
+                                  );
+                                },
                                 isReadOnly: isReadOnly,
                                 onAnswerChanged: ({
                                   response,

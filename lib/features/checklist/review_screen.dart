@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,6 +10,7 @@ import '../../domain/validation.dart';
 import '../../ui/tokens.dart';
 import '../../ui/widgets/progress_bar.dart';
 import '../../ui/widgets/status_chip.dart';
+import 'photo_viewer_screen.dart';
 
 class ReviewScreen extends ConsumerWidget {
   const ReviewScreen({
@@ -92,6 +95,7 @@ class ReviewScreen extends ConsumerWidget {
                     context,
                     tokens,
                     theme,
+                    inspection,
                     failedItems,
                     attachments,
                     isReadOnly,
@@ -468,6 +472,7 @@ class ReviewScreen extends ConsumerWidget {
     BuildContext context,
     TickTokens tokens,
     ThemeData theme,
+    Inspection inspection,
     List<InspectionItem> failedItems,
     List<Attachment> attachments,
     bool isReadOnly,
@@ -587,17 +592,56 @@ class ReviewScreen extends ConsumerWidget {
                     ],
                     if (itemPhotos.isNotEmpty) ...[
                       SizedBox(height: tokens.space8),
-                      Row(
-                        children: [
-                          Icon(Icons.photo_library, size: 16, color: tokens.textSecondary),
-                          SizedBox(width: tokens.space4),
-                          Text(
-                            '${itemPhotos.length} Photo${itemPhotos.length == 1 ? '' : 's'} attached',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: tokens.textSecondary,
-                            ),
-                          ),
-                        ],
+                      SizedBox(
+                        height: 52,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: itemPhotos.length,
+                          separatorBuilder: (context, index) => SizedBox(width: tokens.space8),
+                          itemBuilder: (context, pIdx) {
+                            final photo = itemPhotos[pIdx];
+                            final path = photo.thumbPath ?? photo.localPath;
+                            final exists = path != null && File(path).existsSync();
+
+                            return Semantics(
+                              button: true,
+                              label: 'View evidence photo ${pIdx + 1}',
+                              child: InkWell(
+                                onTap: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => PhotoViewerScreen(
+                                        inspectionId: inspection.id,
+                                        attachmentId: photo.id,
+                                      ),
+                                    ),
+                                  );
+                                },
+                                borderRadius: BorderRadius.circular(tokens.radiusChip),
+                                child: Container(
+                                  width: 52,
+                                  height: 52,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(tokens.radiusChip),
+                                    border: Border.all(color: tokens.border),
+                                    color: tokens.surface,
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: exists
+                                      ? Image.file(
+                                          File(path),
+                                          fit: BoxFit.cover,
+                                          cacheWidth: 104,
+                                        )
+                                      : Center(
+                                          child: Icon(Icons.photo,
+                                              size: 20, color: tokens.textSecondary),
+                                        ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
                       ),
                     ],
                   ],

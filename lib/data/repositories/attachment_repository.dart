@@ -25,6 +25,14 @@ class AttachmentRepository {
         .map((rows) => rows.map(attachmentFromRow).toList());
   }
 
+  Stream<Attachment?> watchAttachment(String id) {
+    return (_db.select(_db.attachments)
+          ..where((t) => t.id.equals(id)))
+        .watchSingleOrNull()
+        .map((row) =>
+            (row != null && row.deletedAt == null) ? attachmentFromRow(row) : null);
+  }
+
   Stream<List<Attachment>> watchItemAttachments(String itemId) {
     return (_db.select(_db.attachments)
           ..where((t) => t.itemId.equals(itemId))

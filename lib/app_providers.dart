@@ -90,7 +90,12 @@ final inspectionItemsProvider =
 
 final inspectionAttachmentsProvider =
     StreamProvider.family<List<Attachment>, String>((ref, inspectionId) {
-  return ref.watch(inspectionRepositoryProvider).watchAttachments(inspectionId);
+  return ref.watch(attachmentRepositoryProvider).watchAttachments(inspectionId);
+});
+
+final singleAttachmentProvider =
+    StreamProvider.family<Attachment?, String>((ref, id) {
+  return ref.watch(attachmentRepositoryProvider).watchAttachment(id);
 });
 
 final inspectionPhotoCountsProvider =

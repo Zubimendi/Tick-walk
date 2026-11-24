@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'app_providers.dart';
 import 'features/checklist/checklist_screen.dart';
+import 'features/checklist/photo_viewer_screen.dart';
 import 'features/checklist/review_screen.dart';
 import 'features/inspections/inspections_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
@@ -43,6 +44,17 @@ final routerProvider = Provider<GoRouter>((ref) {
             builder: (context, state) {
               final id = state.pathParameters['id']!;
               return ReviewScreen(inspectionId: id);
+            },
+          ),
+          GoRoute(
+            path: 'photos/:attachmentId',
+            builder: (context, state) {
+              final id = state.pathParameters['id']!;
+              final attachmentId = state.pathParameters['attachmentId']!;
+              return PhotoViewerScreen(
+                inspectionId: id,
+                attachmentId: attachmentId,
+              );
             },
           ),
         ],
