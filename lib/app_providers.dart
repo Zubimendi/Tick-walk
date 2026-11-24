@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'capture/capture_pipeline.dart';
 import 'capture/gps_service.dart';
 import 'core/clock.dart';
+import 'data/api/auth.dart';
+import 'data/api/pb_client.dart';
+import 'data/api/token_storage.dart';
 import 'data/db/app_database.dart' hide Template, Inspection, InspectionItem, Attachment;
 import 'data/repositories/attachment_repository.dart';
 import 'data/repositories/inspection_repository.dart';
@@ -52,6 +55,22 @@ final capturePipelineProvider = Provider<CapturePipeline>((ref) {
     settingsRepository: ref.watch(settingsRepositoryProvider),
     clock: ref.watch(clockProvider),
     gpsFixProvider: ref.watch(gpsServiceProvider),
+  );
+});
+
+final tokenStorageProvider = Provider<TokenStorage>((ref) {
+  return const SecureTokenStorage();
+});
+
+final pbClientProvider = Provider<PbClient>((ref) {
+  return PbClient(tokenStorage: ref.watch(tokenStorageProvider));
+});
+
+final authServiceProvider = Provider<AuthService>((ref) {
+  return AuthService(
+    pbClient: ref.watch(pbClientProvider),
+    settingsRepository: ref.watch(settingsRepositoryProvider),
+    db: ref.watch(databaseProvider),
   );
 });
 

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'app_providers.dart';
+import 'features/account/account_screen.dart';
 import 'features/checklist/checklist_screen.dart';
 import 'features/checklist/photo_viewer_screen.dart';
 import 'features/checklist/review_screen.dart';
@@ -31,6 +32,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/onboarding',
         builder: (context, state) => const OnboardingScreen(),
+      ),
+      GoRoute(
+        path: '/account',
+        builder: (context, state) => const AccountScreen(),
       ),
       GoRoute(
         path: '/inspections/:id',
