@@ -9,8 +9,11 @@ import 'data/api/token_storage.dart';
 import 'data/db/app_database.dart' hide Template, Inspection, InspectionItem, Attachment;
 import 'data/repositories/attachment_repository.dart';
 import 'data/repositories/inspection_repository.dart';
+import 'data/repositories/outbox_repository.dart';
 import 'data/repositories/settings_repository.dart';
 import 'data/repositories/template_repository.dart';
+import 'data/sync/media_lane.dart';
+import 'data/sync/record_lane.dart';
 import 'domain/models.dart';
 import 'domain/validation.dart';
 
@@ -128,4 +131,34 @@ final inspectionBlockersProvider =
   final photoCounts =
       ref.watch(inspectionPhotoCountsProvider(inspectionId)).value ?? {};
   return validateCompletion(items: items, photoCountByItem: photoCounts);
+});
+
+final outboxRepositoryProvider = Provider<OutboxRepository>((ref) {
+  return OutboxRepository(
+    ref.watch(databaseProvider),
+    ref.watch(clockProvider),
+  );
+});
+
+final recordLaneProvider = Provider<RecordLane>((ref) {
+  return RecordLane(
+    pbClient: ref.watch(pbClientProvider),
+    db: ref.watch(databaseProvider),
+    outboxRepo: ref.watch(outboxRepositoryProvider),
+    clock: ref.watch(clockProvider),
+  );
+});
+
+final mediaLaneProvider = Provider<MediaLane>((ref) {
+  return MediaLane(
+    pbClient: ref.watch(pbClientProvider),
+    db: ref.watch(databaseProvider),
+    outboxRepo: ref.watch(outboxRepositoryProvider),
+    settingsRepo: ref.watch(settingsRepositoryProvider),
+    clock: ref.watch(clockProvider),
+  );
+});
+
+final pendingOutboxCountProvider = StreamProvider<int>((ref) {
+  return ref.watch(outboxRepositoryProvider).watchPendingCount();
 });
