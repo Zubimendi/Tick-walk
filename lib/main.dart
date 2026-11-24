@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
 import 'app_providers.dart';
+import 'background/upload_worker.dart';
 import 'data/db/app_database.dart';
 
 void main() async {
@@ -17,6 +18,9 @@ void main() async {
   PlatformDispatcher.instance.onError = (error, stack) {
     return true;
   };
+
+  // Register background upload worker (Section 8.10)
+  await UploadWorker.registerBackgroundUpload();
 
   runApp(
     ProviderScope(
