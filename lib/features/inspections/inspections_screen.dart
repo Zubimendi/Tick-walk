@@ -8,6 +8,7 @@ import '../../domain/models.dart';
 import '../../ui/tokens.dart';
 import '../../ui/widgets/empty_state.dart';
 import '../../ui/widgets/progress_bar.dart';
+import '../../ui/widgets/status_chip.dart';
 import 'new_inspection_sheet.dart';
 
 class InspectionsScreen extends ConsumerStatefulWidget {
@@ -117,7 +118,7 @@ class _InspectionsScreenState extends ConsumerState<InspectionsScreen> {
   }
 }
 
-class _InspectionCard extends StatelessWidget {
+class _InspectionCard extends ConsumerWidget {
   const _InspectionCard({
     required this.inspection,
     required this.onTap,
@@ -127,9 +128,10 @@ class _InspectionCard extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final tokens = context.tokens;
     final theme = Theme.of(context);
+    final syncState = ref.watch(inspectionSyncStateProvider(inspection.id)).value;
 
     return Material(
       color: tokens.surface,
@@ -165,11 +167,23 @@ class _InspectionCard extends StatelessWidget {
                 ],
               ),
               SizedBox(height: tokens.space4),
-              Text(
-                inspection.templateName,
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: tokens.textSecondary,
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      inspection.templateName,
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: tokens.textSecondary,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (syncState != null) ...[
+                    SizedBox(width: tokens.space8),
+                    UploadStatusChip(state: syncState),
+                  ],
+                ],
               ),
               SizedBox(height: tokens.space12),
               InspectionProgressBar(

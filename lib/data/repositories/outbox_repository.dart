@@ -48,6 +48,15 @@ class OutboxRepository {
     return query.watch().map((rows) => rows.map(outboxEntryFromRow).toList());
   }
 
+  /// Watches all media outbox entries (pending and parked) for the Uploads queue.
+  Stream<List<OutboxEntry>> watchAllMediaEntries() {
+    final query = _db.select(_db.outbox)
+      ..where((t) => t.lane.equals('media'))
+      ..orderBy([(t) => OrderingTerm.asc(t.seq)]);
+
+    return query.watch().map((rows) => rows.map(outboxEntryFromRow).toList());
+  }
+
   /// Watches count of pending outbox entries.
   Stream<int> watchPendingCount({OutboxLane? lane}) {
     final query = _db.selectOnly(_db.outbox)
@@ -114,6 +123,18 @@ class OutboxRepository {
       db.OutboxCompanion(
         status: const Value('parked'),
         lastError: Value(reason),
+      ),
+    );
+  }
+
+  /// Resets a failed or parked entry so it can be retried immediately.
+  Future<void> retryEntry(int seq) async {
+    await (_db.update(_db.outbox)..where((t) => t.seq.equals(seq))).write(
+      const db.OutboxCompanion(
+        status: Value('pending'),
+        attempts: Value(0),
+        nextAttemptAt: Value(0),
+        lastError: Value(null),
       ),
     );
   }
