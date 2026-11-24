@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:drift/drift.dart';
 
 import '../../core/clock.dart';
@@ -15,6 +16,33 @@ class InspectionRepository {
 
   final db.AppDatabase _db;
   final Clock _clock;
+
+  /// Returns true when sync_owner_id is set (user is signed in) — Rule 6:
+  /// every write also inserts an outbox row in the same transaction.
+  Future<bool> _isSignedIn() async {
+    final row = await (_db.select(_db.settings)..where((t) => t.key.equals('sync_owner_id'))).getSingleOrNull();
+    return row != null && row.value.trim().isNotEmpty;
+  }
+
+  Future<void> _enqueueOutbox({
+    required String entity,
+    required String entityId,
+    required String op,
+    required Map<String, dynamic> payload,
+    String lane = 'records',
+    required int now,
+  }) async {
+    await _db.into(_db.outbox).insert(
+          db.OutboxCompanion.insert(
+            entity: entity,
+            entityId: entityId,
+            op: op,
+            payload: jsonEncode(payload),
+            lane: Value(lane),
+            createdAt: now,
+          ),
+        );
+  }
 
   Stream<List<Inspection>> watchInspections({InspectionStatus? status}) {
     final query = _db.select(_db.inspections)..where((t) => t.deletedAt.isNull());
@@ -107,6 +135,8 @@ class InspectionRepository {
       final structure = TemplateStructure.parse(tplRow.structure);
       final totalCount = structure.totalItems;
 
+      final signedIn = await _isSignedIn();
+
       await _db.transaction(() async {
         // 1. Insert Inspection with snapshot of template name
         await _db.into(_db.inspections).insert(
@@ -135,13 +165,16 @@ class InspectionRepository {
             );
 
         // 2. Snapshot template items into inspection_items
+        final itemIds = <String>[];
         for (var sIdx = 0; sIdx < structure.sections.length; sIdx++) {
           final section = structure.sections[sIdx];
           for (var iIdx = 0; iIdx < section.items.length; iIdx++) {
             final item = section.items[iIdx];
+            final itemId = newId();
+            itemIds.add(itemId);
             await _db.into(_db.inspectionItems).insert(
                   db.InspectionItemsCompanion.insert(
-                    id: newId(),
+                    id: itemId,
                     inspectionId: inspectionId,
                     sectionTitle: section.title,
                     sectionOrder: sIdx,
@@ -155,6 +188,66 @@ class InspectionRepository {
                     updatedAt: now,
                   ),
                 );
+          }
+        }
+
+        // 3. Outbox: enqueue inspection create + all items (Rule 6)
+        if (signedIn) {
+          await _enqueueOutbox(
+            entity: 'inspection',
+            entityId: inspectionId,
+            op: 'create',
+            payload: {
+              'id': inspectionId,
+              'template_id': templateId,
+              'template_name': tplRow.name,
+              'site_name': siteName.trim(),
+              'site_address': siteAddress?.trim(),
+              'inspector_name': inspectorName.trim(),
+              'status': InspectionStatus.inProgress.value,
+              'started_at': now,
+              'start_lat': startLat,
+              'start_lng': startLng,
+              'start_accuracy_m': startAccuracyM,
+              'start_gps_status': startGpsStatus?.value,
+              'start_gps_at': startGpsAt,
+              'total_items': totalCount,
+              'answered_items': 0,
+              'pass_count': 0,
+              'fail_count': 0,
+              'na_count': 0,
+              'client_updated_at': now,
+            },
+            now: now,
+          );
+
+          // Enqueue items — read back to get the ids we just inserted
+          var iGlobal = 0;
+          for (var sIdx = 0; sIdx < structure.sections.length; sIdx++) {
+            final section = structure.sections[sIdx];
+            for (var iIdx = 0; iIdx < section.items.length; iIdx++) {
+              final item = section.items[iIdx];
+              final itemId = itemIds[iGlobal++];
+              await _enqueueOutbox(
+                entity: 'inspection_item',
+                entityId: itemId,
+                op: 'create',
+                payload: {
+                  'id': itemId,
+                  'inspection': inspectionId,
+                  'section_title': section.title,
+                  'section_order': sIdx,
+                  'item_order': iIdx,
+                  'prompt': item.prompt,
+                  'item_type': item.type.value,
+                  'unit': item.unit,
+                  'required': item.required,
+                  'photo_required_on_fail': item.photoRequiredOnFail,
+                  'client_updated_at': now,
+                },
+                now: now,
+              );
+            }
           }
         }
       });
@@ -207,6 +300,8 @@ class InspectionRepository {
         ));
       }
 
+      final signedIn = await _isSignedIn();
+
       await _db.transaction(() async {
         // 1. Update the item
         await (_db.update(_db.inspectionItems)..where((t) => t.id.equals(itemId))).write(
@@ -223,6 +318,25 @@ class InspectionRepository {
 
         // 2. Recompute summary counts from items
         await _recomputeSummaryInsideTx(itemRow.inspectionId, now);
+
+        // 3. Outbox: enqueue item update (Rule 6)
+        if (signedIn) {
+          await _enqueueOutbox(
+            entity: 'inspection_item',
+            entityId: itemId,
+            op: 'update',
+            payload: {
+              'response': response?.value,
+              'severity': severity?.value,
+              'text_value': textValue,
+              'number_value': numberValue,
+              'note': note,
+              'responded_at': now,
+              'client_updated_at': now,
+            },
+            now: now,
+          );
+        }
       });
 
       return const Ok(null);
@@ -246,14 +360,31 @@ class InspectionRepository {
       return const Ok(null);
     }
 
+    final signedIn = await _isSignedIn();
+
     try {
-      await (_db.update(_db.inspections)..where((t) => t.id.equals(id))).write(
-        db.InspectionsCompanion(
-          status: Value(InspectionStatus.inProgress.value),
-          reopenedCount: Value(current.reopenedCount + 1),
-          updatedAt: Value(now),
-        ),
-      );
+      await _db.transaction(() async {
+        await (_db.update(_db.inspections)..where((t) => t.id.equals(id))).write(
+          db.InspectionsCompanion(
+            status: Value(InspectionStatus.inProgress.value),
+            reopenedCount: Value(current.reopenedCount + 1),
+            updatedAt: Value(now),
+          ),
+        );
+        if (signedIn) {
+          await _enqueueOutbox(
+            entity: 'inspection',
+            entityId: id,
+            op: 'update',
+            payload: {
+              'status': InspectionStatus.inProgress.value,
+              'reopened_count': current.reopenedCount + 1,
+              'client_updated_at': now,
+            },
+            now: now,
+          );
+        }
+      });
       return const Ok(null);
     } on Object catch (e) {
       return Err(AppError(
@@ -321,13 +452,29 @@ class InspectionRepository {
     }
 
     try {
-      await (_db.update(_db.inspections)..where((t) => t.id.equals(id))).write(
-        db.InspectionsCompanion(
-          status: Value(InspectionStatus.completed.value),
-          completedAt: Value(now),
-          updatedAt: Value(now),
-        ),
-      );
+      final signedIn = await _isSignedIn();
+      await _db.transaction(() async {
+        await (_db.update(_db.inspections)..where((t) => t.id.equals(id))).write(
+          db.InspectionsCompanion(
+            status: Value(InspectionStatus.completed.value),
+            completedAt: Value(now),
+            updatedAt: Value(now),
+          ),
+        );
+        if (signedIn) {
+          await _enqueueOutbox(
+            entity: 'inspection',
+            entityId: id,
+            op: 'update',
+            payload: {
+              'status': InspectionStatus.completed.value,
+              'completed_at': now,
+              'client_updated_at': now,
+            },
+            now: now,
+          );
+        }
+      });
       return const Ok(null);
     } on Object catch (e) {
       return Err(AppError(

@@ -520,4 +520,32 @@ class OutboxEntry {
   final OutboxStatus status;
   final String? lastError;
   final int createdAt;
+
+  OutboxEntry copyWith({
+    int? seq,
+    OutboxEntity? entity,
+    String? entityId,
+    OutboxOp? op,
+    String? payload,
+    OutboxLane? lane,
+    int? attempts,
+    int? nextAttemptAt,
+    OutboxStatus? status,
+    String? lastError,
+    int? createdAt,
+  }) {
+    return OutboxEntry(
+      seq: seq ?? this.seq,
+      entity: entity ?? this.entity,
+      entityId: entityId ?? this.entityId,
+      op: op ?? this.op,
+      payload: payload ?? this.payload,
+      lane: lane ?? this.lane,
+      attempts: attempts ?? this.attempts,
+      nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
+      status: status ?? this.status,
+      lastError: lastError ?? this.lastError,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
 }

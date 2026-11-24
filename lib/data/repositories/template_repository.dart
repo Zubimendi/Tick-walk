@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:drift/drift.dart';
 
 import '../../core/clock.dart';
@@ -14,6 +15,30 @@ class TemplateRepository {
 
   final db.AppDatabase _db;
   final Clock _clock;
+
+  Future<bool> _isSignedIn() async {
+    final row = await (_db.select(_db.settings)..where((t) => t.key.equals('sync_owner_id'))).getSingleOrNull();
+    return row != null && row.value.trim().isNotEmpty;
+  }
+
+  Future<void> _enqueueOutbox({
+    required String entity,
+    required String entityId,
+    required String op,
+    required Map<String, dynamic> payload,
+    required int now,
+  }) async {
+    await _db.into(_db.outbox).insert(
+          db.OutboxCompanion.insert(
+            entity: entity,
+            entityId: entityId,
+            op: op,
+            payload: jsonEncode(payload),
+            lane: const Value('records'),
+            createdAt: now,
+          ),
+        );
+  }
 
   Stream<List<Template>> watchTemplates() {
     return (_db.select(_db.templates)
@@ -44,20 +69,39 @@ class TemplateRepository {
   }) async {
     final now = _clock.nowMillis();
     final id = newId();
+    final signedIn = await _isSignedIn();
 
     try {
       final jsonStr = structure.serialize();
-      await _db.into(_db.templates).insert(
-            db.TemplatesCompanion.insert(
-              id: id,
-              name: name.trim(),
-              description: Value(description?.trim()),
-              structure: jsonStr,
-              isStarter: const Value(false),
-              createdAt: now,
-              updatedAt: now,
-            ),
+      await _db.transaction(() async {
+        await _db.into(_db.templates).insert(
+              db.TemplatesCompanion.insert(
+                id: id,
+                name: name.trim(),
+                description: Value(description?.trim()),
+                structure: jsonStr,
+                isStarter: const Value(false),
+                createdAt: now,
+                updatedAt: now,
+              ),
+            );
+        if (signedIn) {
+          await _enqueueOutbox(
+            entity: 'template',
+            entityId: id,
+            op: 'create',
+            payload: {
+              'id': id,
+              'name': name.trim(),
+              'description': description?.trim(),
+              'structure': jsonDecode(jsonStr),
+              'is_starter': false,
+              'client_updated_at': now,
+            },
+            now: now,
           );
+        }
+      });
 
       return getTemplate(id);
     } on Object catch (e) {
@@ -76,16 +120,34 @@ class TemplateRepository {
     required TemplateStructure structure,
   }) async {
     final now = _clock.nowMillis();
+    final signedIn = await _isSignedIn();
     try {
       final jsonStr = structure.serialize();
-      final count = await (_db.update(_db.templates)..where((t) => t.id.equals(id))).write(
-        db.TemplatesCompanion(
-          name: Value(name.trim()),
-          description: Value(description?.trim()),
-          structure: Value(jsonStr),
-          updatedAt: Value(now),
-        ),
-      );
+      var count = 0;
+      await _db.transaction(() async {
+        count = await (_db.update(_db.templates)..where((t) => t.id.equals(id))).write(
+          db.TemplatesCompanion(
+            name: Value(name.trim()),
+            description: Value(description?.trim()),
+            structure: Value(jsonStr),
+            updatedAt: Value(now),
+          ),
+        );
+        if (count > 0 && signedIn) {
+          await _enqueueOutbox(
+            entity: 'template',
+            entityId: id,
+            op: 'update',
+            payload: {
+              'name': name.trim(),
+              'description': description?.trim(),
+              'structure': jsonDecode(jsonStr),
+              'client_updated_at': now,
+            },
+            now: now,
+          );
+        }
+      });
 
       if (count == 0) {
         return const Err(AppError(
@@ -117,13 +179,26 @@ class TemplateRepository {
 
   Future<Result<void>> deleteTemplate(String id) async {
     final now = _clock.nowMillis();
+    final signedIn = await _isSignedIn();
     try {
-      final count = await (_db.update(_db.templates)..where((t) => t.id.equals(id))).write(
-        db.TemplatesCompanion(
-          deletedAt: Value(now),
-          updatedAt: Value(now),
-        ),
-      );
+      var count = 0;
+      await _db.transaction(() async {
+        count = await (_db.update(_db.templates)..where((t) => t.id.equals(id))).write(
+          db.TemplatesCompanion(
+            deletedAt: Value(now),
+            updatedAt: Value(now),
+          ),
+        );
+        if (count > 0 && signedIn) {
+          await _enqueueOutbox(
+            entity: 'template',
+            entityId: id,
+            op: 'delete',
+            payload: {'deleted_at': now, 'client_updated_at': now},
+            now: now,
+          );
+        }
+      });
 
       if (count == 0) {
         return const Err(AppError(
