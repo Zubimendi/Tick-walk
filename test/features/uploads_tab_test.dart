@@ -13,7 +13,6 @@ import 'package:tickwalk/data/db/app_database.dart' as db;
 import 'package:tickwalk/data/sync/upload_scheduler.dart';
 import 'package:tickwalk/features/uploads/uploads_screen.dart';
 import 'package:tickwalk/ui/theme.dart';
-import 'package:tickwalk/ui/widgets/status_chip.dart';
 
 void main() {
   late Directory tempDir;
@@ -27,16 +26,16 @@ void main() {
     tempDir = await Directory.systemTemp.createTemp('uploads_tab_test_');
   });
 
-  tearDown(() async {
+  tearDown(() {
     if (tempDir.existsSync()) {
-      await tempDir.delete(recursive: true);
+      tempDir.deleteSync(recursive: true);
     }
   });
 
   // ---------------------------------------------------------------------------
   // Helper: build a fresh in-memory DB, seed wifi_only=false, return it.
   // ---------------------------------------------------------------------------
-  Future<db.AppDatabase> _makeDatabase() async {
+  Future<db.AppDatabase> makeDatabase() async {
     final database = db.AppDatabase(NativeDatabase.memory());
     await database.into(database.settings).insertOnConflictUpdate(
           db.SettingsCompanion.insert(key: 'wifi_only', value: 'false'),
@@ -94,7 +93,7 @@ void main() {
         );
 
     final file = File('${tempDir.path}/$attId.jpg');
-    await file.writeAsBytes([0xFF, 0xD8, 0xFF, 0xD9]);
+    file.writeAsBytesSync([0xFF, 0xD8, 0xFF, 0xD9]);
 
     await database.into(database.attachments).insert(
           db.AttachmentsCompanion.insert(
@@ -152,7 +151,7 @@ void main() {
   group('UploadsScreen UI (T21)', () {
     // -------------------------------------------------------------------------
     testWidgets('renders empty state when queue is empty', (tester) async {
-      final database = await _makeDatabase();
+      final database = await makeDatabase();
 
       await tester.pumpWidget(buildTestWidget(database));
       await pumpView(tester);
@@ -167,7 +166,7 @@ void main() {
     // -------------------------------------------------------------------------
     testWidgets('renders sign-in banner when user is not signed in',
         (tester) async {
-      final database = await _makeDatabase();
+      final database = await makeDatabase();
 
       await tester.pumpWidget(buildTestWidget(database));
       await pumpView(tester);
@@ -180,7 +179,7 @@ void main() {
 
     // -------------------------------------------------------------------------
     testWidgets('renders offline banner when connection is none', (tester) async {
-      final database = await _makeDatabase();
+      final database = await makeDatabase();
 
       await tester.pumpWidget(
           buildTestWidget(database, connection: NetworkConnectionType.none));
@@ -196,7 +195,7 @@ void main() {
     testWidgets(
         'renders queued items with site name, size, and waiting status chip',
         (tester) async {
-      final database = await _makeDatabase();
+      final database = await makeDatabase();
 
       await seedInspectionWithPhoto(
         database,
@@ -219,7 +218,7 @@ void main() {
     // -------------------------------------------------------------------------
     testWidgets('renders failed status with plain reason and Retry button',
         (tester) async {
-      final database = await _makeDatabase();
+      final database = await makeDatabase();
 
       await seedInspectionWithPhoto(
         database,
@@ -253,7 +252,7 @@ void main() {
     // -------------------------------------------------------------------------
     testWidgets('renders paused banner on cellular when Wi-Fi only is enabled',
         (tester) async {
-      final database = await _makeDatabase();
+      final database = await makeDatabase();
 
       await database.into(database.settings).insertOnConflictUpdate(
             db.SettingsCompanion.insert(key: 'wifi_only', value: 'true'),
