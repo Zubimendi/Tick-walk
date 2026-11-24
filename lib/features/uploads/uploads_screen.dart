@@ -26,9 +26,7 @@ class _UploadsScreenState extends ConsumerState<UploadsScreen> {
     setState(() => _isSyncing = true);
 
     try {
-      final conn = ref.read(connectivityStateProvider).value ?? NetworkConnectionType.wifi;
-      await ref.read(recordLaneProvider).syncRecords();
-      await ref.read(mediaLaneProvider).processNextBatch(connection: conn);
+      await ref.read(syncCoordinatorProvider).triggerSync();
     } finally {
       if (mounted) {
         setState(() => _isSyncing = false);
@@ -39,8 +37,7 @@ class _UploadsScreenState extends ConsumerState<UploadsScreen> {
   Future<void> _uploadNowOverride() async {
     final mediaLane = ref.read(mediaLaneProvider);
     mediaLane.setOneBatchOverride(true);
-    final conn = ref.read(connectivityStateProvider).value ?? NetworkConnectionType.cellular;
-    await mediaLane.processNextBatch(connection: conn);
+    await ref.read(syncCoordinatorProvider).triggerSync();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Starting upload on mobile data...')),
@@ -50,8 +47,7 @@ class _UploadsScreenState extends ConsumerState<UploadsScreen> {
 
   Future<void> _retryItem(int outboxSeq) async {
     await ref.read(outboxRepositoryProvider).retryEntry(outboxSeq);
-    final conn = ref.read(connectivityStateProvider).value ?? NetworkConnectionType.wifi;
-    await ref.read(mediaLaneProvider).processNextBatch(connection: conn);
+    await ref.read(syncCoordinatorProvider).triggerSync();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Retrying photo upload...')),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'app_providers.dart';
 import 'router.dart';
 import 'ui/theme.dart';
 
@@ -19,6 +20,9 @@ class TickwalkApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Keep sync coordinator active across the application lifecycle.
+    ref.watch(syncCoordinatorProvider);
+
     final router = ref.watch(routerProvider);
     final themeMode = ref.watch(themeModeProvider);
 

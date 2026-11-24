@@ -17,6 +17,7 @@ import 'data/repositories/template_repository.dart';
 import 'data/sync/connectivity.dart';
 import 'data/sync/media_lane.dart';
 import 'data/sync/record_lane.dart';
+import 'data/sync/sync_coordinator.dart';
 import 'data/sync/upload_scheduler.dart';
 import 'domain/models.dart';
 import 'domain/validation.dart';
@@ -174,6 +175,18 @@ final connectivityServiceProvider = Provider<ConnectivityService>((ref) {
 
 final connectivityStateProvider = StreamProvider<NetworkConnectionType>((ref) {
   return ref.watch(connectivityServiceProvider).watch();
+});
+
+final syncCoordinatorProvider = Provider<SyncCoordinator>((ref) {
+  final coordinator = SyncCoordinator(
+    recordLane: ref.watch(recordLaneProvider),
+    mediaLane: ref.watch(mediaLaneProvider),
+    connectivityService: ref.watch(connectivityServiceProvider),
+    authService: ref.watch(authServiceProvider),
+    autoStart: true,
+  );
+  ref.onDispose(() => coordinator.dispose());
+  return coordinator;
 });
 
 final inspectionSyncStateProvider =
