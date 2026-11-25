@@ -152,5 +152,51 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump(const Duration(milliseconds: 100));
     });
+
+    testWidgets('Successful sign in enqueues local data into outbox', (tester) async {
+      fakeAuth.fakeIsSignedIn = false;
+      fakeAuth.resultToReturn = const AuthSuccess(
+        userId: 'user_success',
+        email: 'success@safety.org',
+      );
+
+      // Seed an inspection before signing in
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await db.into(db.inspections).insert(
+            InspectionsCompanion.insert(
+              id: 'insp_seed1',
+              templateName: 'Template 1',
+              siteName: 'Site Alpha',
+              inspectorName: 'Inspector 1',
+              status: 'in_progress',
+              startedAt: now,
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+
+      await tester.pumpWidget(buildTestScreen());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // Enter credentials
+      await tester.enterText(find.byType(TextField).at(0), 'success@safety.org');
+      await tester.enterText(find.byType(TextField).at(1), 'password123');
+
+      // Tap Sign In
+      await tester.tap(find.byKey(const ValueKey('sign_in_button')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // Check snackbar
+      expect(find.text('Signed in successfully.'), findsOneWidget);
+
+      // Verify inspection was enqueued into outbox
+      final outboxRows = await db.select(db.outbox).get();
+      expect(outboxRows.any((r) => r.entityId == 'insp_seed1'), isTrue);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(milliseconds: 100));
+    });
   });
 }

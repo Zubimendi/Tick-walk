@@ -266,10 +266,14 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     final authResult = res.valueOrNull!;
     switch (authResult) {
       case AuthSuccess():
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Signed in successfully.')),
-        );
-        setState(() {});
+        await ref.read(outboxRepositoryProvider).enqueueAllLocalData();
+        await ref.read(syncCoordinatorProvider).triggerSync();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Signed in successfully.')),
+          );
+          setState(() {});
+        }
 
       case DifferentAccountDetected(
           :final previousOwnerId,
@@ -305,11 +309,14 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
 
         if (confirmed == true) {
           final switchRes = await authService.confirmAccountSwitch(newOwnerId);
-          if (switchRes.isOk && mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Switched account and reset local sync data.')),
-            );
-            setState(() {});
+          if (switchRes.isOk) {
+            await ref.read(syncCoordinatorProvider).triggerSync();
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Switched account and reset local sync data.')),
+              );
+              setState(() {});
+            }
           }
         } else {
           await authService.cancelAccountSwitch();
