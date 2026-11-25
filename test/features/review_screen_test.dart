@@ -293,8 +293,10 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      // Should display Completed banner
+      // Should display Completed banner, PDF export actions, and Reopen button
       expect(find.text('Inspection Completed'), findsOneWidget);
+      expect(find.byKey(const ValueKey('export_pdf_button')), findsOneWidget);
+      expect(find.byKey(const ValueKey('share_report_button')), findsOneWidget);
       expect(find.byKey(const ValueKey('reopen_inspection_button')),
           findsOneWidget);
 

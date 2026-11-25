@@ -51,6 +51,14 @@ class ReviewScreen extends ConsumerWidget {
                 color: tokens.text,
               ),
             ),
+            actions: [
+              IconButton(
+                key: const ValueKey('export_pdf_button'),
+                icon: const Icon(Icons.picture_as_pdf),
+                tooltip: 'Export PDF Report',
+                onPressed: () => _exportPdf(context, ref, inspection),
+              ),
+            ],
           ),
           body: itemsAsync.when(
             data: (items) {
@@ -115,14 +123,30 @@ class ReviewScreen extends ConsumerWidget {
                 border: Border(top: BorderSide(color: tokens.border)),
               ),
               child: isReadOnly
-                  ? OutlinedButton.icon(
-                      key: const ValueKey('reopen_inspection_button'),
-                      onPressed: () => _confirmReopen(context, ref, inspection),
-                      icon: const Icon(Icons.lock_open),
-                      label: const Text('Reopen Inspection for Editing'),
-                      style: OutlinedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(52),
-                      ),
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        FilledButton.icon(
+                          key: const ValueKey('share_report_button'),
+                          onPressed: () => _exportPdf(context, ref, inspection),
+                          icon: const Icon(Icons.share),
+                          label: const Text('Share PDF Report'),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                            backgroundColor: tokens.primary,
+                          ),
+                        ),
+                        SizedBox(height: tokens.space8),
+                        OutlinedButton.icon(
+                          key: const ValueKey('reopen_inspection_button'),
+                          onPressed: () => _confirmReopen(context, ref, inspection),
+                          icon: const Icon(Icons.lock_open),
+                          label: const Text('Reopen Inspection for Editing'),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48),
+                          ),
+                        ),
+                      ],
                     )
                   : Semantics(
                       label: blockers.isEmpty
@@ -722,6 +746,34 @@ class ReviewScreen extends ConsumerWidget {
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(res.errorOrNull!.message)),
+        );
+      }
+    }
+  }
+
+  Future<void> _exportPdf(
+    BuildContext context,
+    WidgetRef ref,
+    Inspection inspection,
+  ) async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Generating PDF report...')),
+      );
+
+      final items = await ref.read(inspectionItemsProvider(inspection.id).future);
+      final attachments = await ref.read(inspectionAttachmentsProvider(inspection.id).future);
+
+      final exportService = ref.read(pdfExportServiceProvider);
+      await exportService.shareReport(
+        inspection: inspection,
+        items: items,
+        attachments: attachments,
+      );
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not generate PDF: $e')),
         );
       }
     }

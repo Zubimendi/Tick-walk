@@ -21,6 +21,7 @@ import 'data/sync/sync_coordinator.dart';
 import 'data/sync/upload_scheduler.dart';
 import 'domain/models.dart';
 import 'domain/validation.dart';
+import 'features/reports/pdf_export_service.dart';
 import 'ui/widgets/status_chip.dart';
 
 final clockProvider = Provider<Clock>((ref) => const SystemClock());
@@ -52,6 +53,10 @@ final attachmentRepositoryProvider = Provider<AttachmentRepository>((ref) {
     ref.watch(databaseProvider),
     ref.watch(clockProvider),
   );
+});
+
+final pdfExportServiceProvider = Provider<PdfExportService>((ref) {
+  return const PdfExportService();
 });
 
 final gpsServiceProvider = Provider<GpsService>((ref) {
